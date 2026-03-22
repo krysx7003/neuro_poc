@@ -12,6 +12,7 @@ Wymagania:
 import time
 
 import streamlit as st
+from streamlit.delta_generator import DeltaGenerator
 
 from config import (
     DEFAULT_GROQ_MODEL,
@@ -46,12 +47,14 @@ def main() -> None:
         layout="wide",
         initial_sidebar_state="collapsed",
     )
-    st.markdown(UODO_CSS, unsafe_allow_html=True)
-    st.markdown(PAGE_HEADER_HTML, unsafe_allow_html=True)
+
+    _ = st.markdown(UODO_CSS, unsafe_allow_html=True)
+    _ = st.markdown(PAGE_HEADER_HTML, unsafe_allow_html=True)
+    _ = st.markdown("---")
 
     # ── Sidebar ─────────────────────────────────────────────────────
     with st.sidebar:
-        st.markdown("## ⚙️ Opcje")
+        _ = st.markdown("## ⚙️ Opcje")
 
         provider = st.selectbox(
             "Provider LLM", ["Ollama", "Groq"], key="provider_select"
@@ -67,7 +70,7 @@ def main() -> None:
             )
         else:
             api_key = ""
-            st.caption(f"🖥️ Ollama: `{OLLAMA_URL}`")
+            _ = st.caption(f"🖥️ Ollama: `{OLLAMA_URL}`")
 
         models = get_available_models(provider, api_key)
         default_model = (
@@ -80,18 +83,18 @@ def main() -> None:
         st.session_state["llm_model"] = selected_model
         st.session_state["llm_api_key"] = api_key
 
-        st.markdown("---")
+        _ = st.markdown("---")
         use_graph = st.toggle("Graf powiązań", value=True)
 
-        st.markdown("### 📂 Typ dokumentów")
+        _ = st.markdown("### 📂 Typ dokumentów")
         show_decisions = st.checkbox("Decyzje UODO", value=True)
         show_act = st.checkbox("Ustawa o ochronie danych (u.o.d.o.)", value=True)
         show_gdpr = st.checkbox("RODO (rozporządzenie UE 2016/679)", value=True)
 
-        st.markdown("---")
+        _ = st.markdown("---")
         try:
             stats = get_collection_stats()
-            st.markdown("### 📊 Baza wiedzy")
+            _ = st.markdown("### 📊 Baza wiedzy")
             st.metric("Decyzje UODO", stats.get("decisions", 0))
             st.metric("Artykuły u.o.d.o.", stats.get("act_chunks", 0))
             if stats.get("edges"):
@@ -125,6 +128,10 @@ def main() -> None:
 
     taxonomy = get_taxonomy_options()
 
+    answer_placeholder = st.empty()
+    full_answer = ""
+    _render_answer(answer_placeholder, full_answer)
+
     # ── Pole wyszukiwania ────────────────────────────────────────
     if "_example_query" in st.session_state:
         st.session_state["query_input"] = st.session_state.pop("_example_query")
@@ -146,7 +153,7 @@ def main() -> None:
     with st.expander("🔽 Filtry zaawansowane", expanded=False):
         fc1, fc2, fc3 = st.columns(3)
         with fc1:
-            st.markdown(
+            _ = st.markdown(
                 '<div class="filter-label">Sygnatura</div>', unsafe_allow_html=True
             )
             sig_filter = st.text_input(
@@ -155,7 +162,7 @@ def main() -> None:
                 label_visibility="collapsed",
                 key="sig_filter",
             )
-            st.markdown(
+            _ = st.markdown(
                 '<div class="filter-label">Status</div>', unsafe_allow_html=True
             )
             status_filter = st.selectbox(
@@ -164,7 +171,7 @@ def main() -> None:
                 label_visibility="collapsed",
                 key="status_filter",
             )
-            st.markdown(
+            _ = st.markdown(
                 '<div class="filter-label">Słowa kluczowe</div>', unsafe_allow_html=True
             )
             all_tags = get_all_tags()
@@ -178,7 +185,7 @@ def main() -> None:
                 or ""
             )
         with fc2:
-            st.markdown(
+            _ = st.markdown(
                 '<div class="filter-label">Rodzaj decyzji</div>', unsafe_allow_html=True
             )
             tax_decision = st.multiselect(
@@ -187,7 +194,7 @@ def main() -> None:
                 label_visibility="collapsed",
                 key="tax_decision",
             )
-            st.markdown(
+            _ = st.markdown(
                 '<div class="filter-label">Środek naprawczy</div>',
                 unsafe_allow_html=True,
             )
@@ -197,7 +204,7 @@ def main() -> None:
                 label_visibility="collapsed",
                 key="tax_measure",
             )
-            st.markdown(
+            _ = st.markdown(
                 '<div class="filter-label">Podstawa prawna</div>',
                 unsafe_allow_html=True,
             )
@@ -208,7 +215,7 @@ def main() -> None:
                 key="tax_legal_basis",
             )
         with fc3:
-            st.markdown(
+            _ = st.markdown(
                 '<div class="filter-label">Rodzaj naruszenia</div>',
                 unsafe_allow_html=True,
             )
@@ -218,7 +225,7 @@ def main() -> None:
                 label_visibility="collapsed",
                 key="tax_violation",
             )
-            st.markdown(
+            _ = st.markdown(
                 '<div class="filter-label">Sektor</div>', unsafe_allow_html=True
             )
             tax_sector = st.multiselect(
@@ -227,7 +234,7 @@ def main() -> None:
                 label_visibility="collapsed",
                 key="tax_sector",
             )
-            st.markdown(
+            _ = st.markdown(
                 '<div class="filter-label">Data ogłoszenia (od–do)</div>',
                 unsafe_allow_html=True,
             )
@@ -249,7 +256,7 @@ def main() -> None:
 
     # ── Przykładowe pytania ──────────────────────────────────────
     with st.expander("💡 Przykładowe pytania", expanded=not bool(query)):
-        st.caption("Kliknij pytanie aby je wyszukać:")
+        _ = st.caption("Kliknij pytanie aby je wyszukać:")
         examples = [
             ("🔔", "Kiedy wymagane jest zgłoszenie naruszenia danych?"),
             ("⚖️", "Jakie kary może nałożyć Prezes UODO?"),
@@ -321,25 +328,25 @@ def main() -> None:
                 with st.expander(
                     "🧠 Reasoning Step — jak zrozumiałem pytanie", expanded=False
                 ):
-                    st.caption(f"**Typ zapytania:** {decomp.query_type.value}")
-                    st.caption(f"**Rozumowanie:** {decomp.reasoning}")
+                    _ = st.caption(f"**Typ zapytania:** {decomp.query_type.value}")
+                    _ = st.caption(f"**Rozumowanie:** {decomp.reasoning}")
                     if decomp.search_keywords:
-                        st.caption(
+                        _ = st.caption(
                             "**Słowa kluczowe:** "
                             + " · ".join(f"`{k}`" for k in decomp.search_keywords)
                         )
                     if decomp.gdpr_articles_hint:
-                        st.caption(
+                        _ = st.caption(
                             "**Wskazane artykuły RODO:** "
                             + ", ".join(decomp.gdpr_articles_hint)
                         )
                     if decomp.uodo_act_articles_hint:
-                        st.caption(
+                        _ = st.caption(
                             "**Wskazane artykuły u.o.d.o.:** "
                             + ", ".join(decomp.uodo_act_articles_hint)
                         )
                     if decomp.enriched_query != effective_query:
-                        st.caption(
+                        _ = st.caption(
                             f"**Wzbogacone zapytanie:** _{decomp.enriched_query}_"
                         )
 
@@ -394,31 +401,21 @@ def main() -> None:
         graph_docs = [d for d in docs if d.get("_source") == "graph"]
 
         _tag_info = f" · tag: `{kw_filter}`" if kw_filter.strip() else ""
-        st.caption(
+        _ = st.caption(
             f"Znaleziono {len(docs)} dokumentów "
             f"({len(decisions)} decyzji, {len(act_arts)} u.o.d.o., "
             f"{len(gdpr_docs)} RODO, {len(graph_docs)} przez graf) · {search_time:.2f}s"
             + _tag_info
         )
         if _tags:
-            st.caption("🏷️ Tagi: " + " · ".join(f"`{t}`" for t in _tags))
+            _ = st.caption("🏷️ Tagi: " + " · ".join(f"`{t}`" for t in _tags))
 
         if use_llm:
             context = build_context(
                 docs, effective_query, filters=filters, memory=memory
             )
-            st.markdown("### 💬 Odpowiedź AI")
-            answer_placeholder = st.empty()
-            full_answer = ""
-            try:
-                for chunk in call_llm_stream(effective_query, context):
-                    full_answer += chunk
-                    answer_placeholder.markdown(
-                        f'<div class="answer-box">{full_answer}</div>',
-                        unsafe_allow_html=True,
-                    )
-            except Exception as e:
-                st.error(f"Błąd LLM: {e}")
+
+            full_answer = _render_answer(answer_placeholder, effective_query, context)
 
             if full_answer:
                 memory.add(
@@ -442,7 +439,7 @@ def main() -> None:
                 )
                 _render_memory_history(memory_placeholder, memory)
 
-        st.markdown(f"### 📋 Dokumenty ({len(docs)})")
+        _ = st.markdown(f"### 📋 Dokumenty ({len(docs)})")
         tabs = st.tabs(
             [
                 f"Wszystkie ({len(docs)})",
@@ -483,25 +480,57 @@ def main() -> None:
                 st.info("Brak wyników z grafu powiązań.")
 
 
-def _render_memory_history(placeholder, memory: AgentMemory) -> None:
+def _render_answer(
+    placeholder: DeltaGenerator,
+    effective_query: str | None = None,
+    context: str | None = None,
+) -> str | None:
+    with placeholder.container(horizontal_alignment="right"):
+        if effective_query and context:
+            with st.container(border=True, width="content", key="query-container"):
+                _ = st.markdown(effective_query)
+
+            try:
+                answer = ""
+                answer_placeholder = st.empty()
+                chunk_count = 0
+
+                for chunk in call_llm_stream(effective_query, context):
+                    answer += chunk
+                    chunk_count += 1
+
+                    with answer_placeholder.container(
+                        border=True,
+                        key=f"answer-container-{chunk_count}",
+                    ):
+                        _ = st.markdown(answer)
+                return answer
+            except Exception as e:
+                _ = st.error(f"Błąd LLM: {e}")
+                return None
+        else:
+            return None
+
+
+def _render_memory_history(placeholder: DeltaGenerator, memory: AgentMemory) -> None:
     """Render memory history in the sidebar placeholder."""
     with placeholder.container():
         if memory.entries:
-            st.markdown("---")
-            st.markdown("### 🧠 Historia sesji")
+            _ = st.markdown("---")
+            _ = st.markdown("### 🧠 Historia sesji")
             for i, e in enumerate(memory.entries):
                 short_q = e.query[:40] + ("…" if len(e.query) > 40 else "")
                 with st.expander(f"{i + 1}. {short_q}", expanded=False):
                     if e.decomposition_summary:
-                        st.caption(f"_{e.decomposition_summary}_")
+                        _ = st.caption(f"_{e.decomposition_summary}_")
                     if e.top_signatures:
-                        st.caption(
+                        _ = st.caption(
                             "📋 " + " · ".join(f"`{s}`" for s in e.top_signatures[:3])
                         )
                     if e.top_articles:
-                        st.caption("📜 " + " · ".join(e.top_articles))
+                        _ = st.caption("📜 " + " · ".join(e.top_articles))
                     if e.answer_snippet:
-                        st.caption(e.answer_snippet[:200] + "…")
+                        _ = st.caption(e.answer_snippet[:200] + "…")
         else:
             # Optional: show message when empty
             pass

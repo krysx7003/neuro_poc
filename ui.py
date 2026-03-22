@@ -17,27 +17,6 @@ from models import (
     AgentMemory,
 )
 
-# ─────────────────────────── CSS PORTALU UODO ────────────────────
-# uodo-blue-10: #f5f8f8;
-# --uodo-blue-20: #e8f1fd;
-# --uodo-blue-30: #dde3ee; Outline
-# --uodo-blue-33: #a5b3dd;
-# --uodo-blue-35: #6d83cc;
-# --uodo-blue-38: #356bcc;
-# --uodo-blue-40: #0058cc;
-# --uodo-blue-50: #275faa;
-# --uodo-blue-60: #0e4591; Przycisk szukaj/background sidebara
-# --uodo-blue-80: #092e60;
-# --uodo-dark-gray: #3f444f;
-# --uodo-light-gray: #c8ccd3;
-# --uodo-red: #f25a5a;
-# --uodo-red-logo: #cd071e;
-# --uodo-red-dark: #b22222;
-# --uodo-white: #fff;
-# --uodo-black: rgba(26,26,28,1);
-# --body-color: rgba(26,26,28,1);
-# --content-width: 1070px;
-
 UODO_CSS = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700;800&display=swap');
