@@ -116,6 +116,7 @@ def _extract_fragment(content: str, query: str, max_len: int = 2000) -> str:
 def build_context(
     docs: list[dict[str, Any]],
     query: str,
+    thread_id: int | None,
     max_chars: int = 18000,
     filters: dict[str, Any] | None = None,
     memory: AgentMemory | None = None,
@@ -147,8 +148,11 @@ def build_context(
     )
 
     memory_note = ""
-    if memory:
-        related = memory.find_related(query)
+
+    print("Generating memory context")
+    if memory and thread_id:
+        print("Memory and thread_id exist")
+        related = memory.find_related(query, thread_id)
         if related:
             snippets = [
                 f"- Poprzednie pytanie: «{e.query}» → znalezione decyzje: "
@@ -160,6 +164,8 @@ def build_context(
                 + "\n".join(snippets)
                 + "\n"
             )
+
+        print(f"Context {related}")
 
     header = TPL_HEADER.render(
         query=query, filter_note=filter_note, memory_note=memory_note

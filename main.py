@@ -52,6 +52,9 @@ def main() -> None:
     _ = st.markdown(PAGE_HEADER_HTML, unsafe_allow_html=True)
     _ = st.markdown("---")
 
+    if "thread_id" not in st.session_state:
+        st.session_state["thread_id"] = None
+
     # ── Sidebar ─────────────────────────────────────────────────────
     with st.sidebar:
         _ = st.markdown("## ⚙️ Opcje")
@@ -128,9 +131,11 @@ def main() -> None:
 
     taxonomy = get_taxonomy_options()
 
+    history_placeholder = st.empty()
+    _render_history(history_placeholder, None)
     answer_placeholder = st.empty()
     full_answer = ""
-    _render_answer(answer_placeholder, full_answer)
+    _ = _render_answer(answer_placeholder, full_answer)
 
     # ── Pole wyszukiwania ────────────────────────────────────────
     if "_example_query" in st.session_state:
@@ -375,7 +380,7 @@ def main() -> None:
                                 rdoc["_score"] = 0.9
                                 docs.append(rdoc)
                 else:
-                    st.warning(
+                    _ = st.warning(
                         f"Nie znaleziono decyzji o sygnaturze **{sig_norm}** w bazie."
                     )
                     docs, _tags = hybrid_search(
@@ -388,7 +393,7 @@ def main() -> None:
             search_time = time.time() - t0
 
         if not docs:
-            st.warning(
+            _ = st.warning(
                 "Nie znaleziono dokumentów. Spróbuj zmienić filtry lub sformułowanie."
             )
             return
@@ -402,41 +407,51 @@ def main() -> None:
 
         _tag_info = f" · tag: `{kw_filter}`" if kw_filter.strip() else ""
         _ = st.caption(
-            f"Znaleziono {len(docs)} dokumentów "
-            f"({len(decisions)} decyzji, {len(act_arts)} u.o.d.o., "
-            f"{len(gdpr_docs)} RODO, {len(graph_docs)} przez graf) · {search_time:.2f}s"
+            f"""Znaleziono {len(docs)} dokumentów 
+            ({len(decisions)} decyzji, {len(act_arts)} u.o.d.o., 
+            {len(gdpr_docs)} RODO, {len(graph_docs)} przez graf) · {search_time:.2f}s"""
             + _tag_info
         )
         if _tags:
             _ = st.caption("🏷️ Tagi: " + " · ".join(f"`{t}`" for t in _tags))
 
         if use_llm:
+            thread_id: int | None = st.session_state["thread_id"]
+            print(f"Thread id: {thread_id}")
             context = build_context(
-                docs, effective_query, filters=filters, memory=memory
+                docs, effective_query, thread_id, filters=filters, memory=memory
             )
+            thread = None
+
+            if thread_id:
+                thread = memory.entries[thread_id]
+
+            _render_history(history_placeholder, thread)
 
             full_answer = _render_answer(answer_placeholder, effective_query, context)
 
             if full_answer:
-                memory.add(
-                    MemoryEntry(
-                        query=effective_query,
-                        enriched_query=search_query,
-                        decomposition_summary=decomp.reasoning if decomp else "",
-                        top_signatures=[
-                            d.get("signature", "")
-                            for d in decisions[:5]
-                            if d.get("signature")
-                        ],
-                        top_articles=[
-                            f"Art. {d.get('article_num')}"
-                            for d in act_arts[:3]
-                            if d.get("article_num")
-                        ],
-                        answer_snippet=full_answer[:300],
-                        full_answer=full_answer,
-                    )
+                entry = MemoryEntry(
+                    query=effective_query,
+                    enriched_query=search_query,
+                    decomposition_summary=decomp.reasoning if decomp else "",
+                    top_signatures=[
+                        d.get("signature", "")
+                        for d in decisions[:5]
+                        if d.get("signature")
+                    ],
+                    top_articles=[
+                        f"Art. {d.get('article_num')}"
+                        for d in act_arts[:3]
+                        if d.get("article_num")
+                    ],
+                    answer_snippet=full_answer[:300],
+                    full_answer=full_answer,
                 )
+
+                id = memory.add(entry, thread_id)
+                st.session_state["thread_id"] = id
+
                 _render_memory_history(memory_placeholder, memory)
 
         _ = st.markdown(f"### 📋 Dokumenty ({len(docs)})")
@@ -458,26 +473,44 @@ def main() -> None:
                 for i, doc in enumerate(decisions, 1):
                     render_decision_card(doc, i)
             else:
-                st.info("Brak decyzji UODO dla tego zapytania.")
+                _ = st.info("Brak decyzji UODO dla tego zapytania.")
         with tabs[2]:
             if act_arts:
                 for i, doc in enumerate(act_arts, 1):
                     render_act_article_card(doc, i)
             else:
-                st.info("Brak artykułów ustawy dla tego zapytania.")
+                _ = st.info("Brak artykułów ustawy dla tego zapytania.")
         with tabs[3]:
             if gdpr_docs:
                 for i, doc in enumerate(gdpr_docs, 1):
                     render_gdpr_card(doc, i)
             else:
-                st.info("Brak artykułów RODO dla tego zapytania.")
+                _ = st.info("Brak artykułów RODO dla tego zapytania.")
         with tabs[4]:
             if graph_docs:
-                st.info("Decyzje powiązane przez cytowania z wynikami semantic search.")
+                _ = st.info(
+                    "Decyzje powiązane przez cytowania z wynikami semantic search."
+                )
                 for i, doc in enumerate(graph_docs, 1):
                     render_decision_card(doc, i)
             else:
-                st.info("Brak wyników z grafu powiązań.")
+                _ = st.info("Brak wyników z grafu powiązań.")
+
+
+def _render_history(
+    placeholder: DeltaGenerator,
+    thread: list[MemoryEntry] | None = None,
+):
+    with placeholder.container(horizontal_alignment="right"):
+        if thread:
+            for entry in thread:
+                with st.container(border=True, width="content"):
+                    _ = st.markdown(entry.query)
+
+                with st.container(border=True):
+                    _ = st.markdown(entry.full_answer)
+        else:
+            pass
 
 
 def _render_answer(
@@ -487,22 +520,17 @@ def _render_answer(
 ) -> str | None:
     with placeholder.container(horizontal_alignment="right"):
         if effective_query and context:
-            with st.container(border=True, width="content", key="query-container"):
+            with st.container(border=True, width="content"):
                 _ = st.markdown(effective_query)
 
             try:
                 answer = ""
                 answer_placeholder = st.empty()
-                chunk_count = 0
 
                 for chunk in call_llm_stream(effective_query, context):
                     answer += chunk
-                    chunk_count += 1
 
-                    with answer_placeholder.container(
-                        border=True,
-                        key=f"answer-container-{chunk_count}",
-                    ):
+                    with answer_placeholder.container(border=True):
                         _ = st.markdown(answer)
                 return answer
             except Exception as e:
@@ -518,7 +546,7 @@ def _render_memory_history(placeholder: DeltaGenerator, memory: AgentMemory) -> 
         if memory.entries:
             _ = st.markdown("---")
             _ = st.markdown("### 🧠 Historia sesji")
-            for i, e in enumerate(memory.entries):
+            for i, e in enumerate(memory.entries[0]):
                 short_q = e.query[:40] + ("…" if len(e.query) > 40 else "")
                 with st.expander(f"{i + 1}. {short_q}", expanded=False):
                     if e.decomposition_summary:

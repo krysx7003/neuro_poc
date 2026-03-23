@@ -1,4 +1,5 @@
 """
+
 Wyszukiwanie — Qdrant (semantic + keyword), graf powiązań, tagi LLM, taksonomia.
 """
 
