@@ -69,11 +69,16 @@ class AgentMemory(BaseModel):
 
     def add(self, entry: MemoryEntry, id: int | None = None) -> int:
         if not id:
-            new_thread: list[MemoryEntry] = []
-            self.entries.append(new_thread)
-            id = len(self.entries) - 1
+            id = self.new_thread()
 
         self.entries[id].append(entry)
+
+        return id
+
+    def new_thread(self) -> int:
+        new_thread: list[MemoryEntry] = []
+        self.entries.append(new_thread)
+        id = len(self.entries) - 1
 
         return id
 

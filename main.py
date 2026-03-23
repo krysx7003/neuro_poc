@@ -55,6 +55,12 @@ def main() -> None:
     if "thread_id" not in st.session_state:
         st.session_state["thread_id"] = None
 
+    history_placeholder = st.empty()
+    _render_history(history_placeholder, None)
+    answer_placeholder = st.empty()
+    full_answer = ""
+    _ = _render_answer(answer_placeholder, full_answer)
+
     # ── Sidebar ─────────────────────────────────────────────────────
     with st.sidebar:
         _ = st.markdown("## ⚙️ Opcje")
@@ -111,7 +117,7 @@ def main() -> None:
         if "agent_memory" not in st.session_state:
             st.session_state["agent_memory"] = AgentMemory()
         memory: AgentMemory = st.session_state["agent_memory"]
-        _render_memory_history(memory_placeholder, memory)
+        _render_memory_history(memory_placeholder, history_placeholder, memory)
 
     # ── Filtry typów dokumentów ──────────────────────────────────
     doc_types = []
@@ -130,12 +136,6 @@ def main() -> None:
         ]
 
     taxonomy = get_taxonomy_options()
-
-    history_placeholder = st.empty()
-    _render_history(history_placeholder, None)
-    answer_placeholder = st.empty()
-    full_answer = ""
-    _ = _render_answer(answer_placeholder, full_answer)
 
     # ── Pole wyszukiwania ────────────────────────────────────────
     if "_example_query" in st.session_state:
@@ -452,7 +452,7 @@ def main() -> None:
                 id = memory.add(entry, thread_id)
                 st.session_state["thread_id"] = id
 
-                _render_memory_history(memory_placeholder, memory)
+                _render_memory_history(memory_placeholder, history_placeholder, memory)
 
         _ = st.markdown(f"### 📋 Dokumenty ({len(docs)})")
         tabs = st.tabs(
@@ -540,27 +540,57 @@ def _render_answer(
             return None
 
 
-def _render_memory_history(placeholder: DeltaGenerator, memory: AgentMemory) -> None:
+def on_thread_select(
+    history_placeholder: DeltaGenerator, thread_id: int, thread: list[MemoryEntry]
+):
+    """Callback when thread button is clicked"""
+    st.session_state["thread_id"] = thread_id
+    st.session_state["query_input"] = ""
+
+    if history_placeholder:
+        _ = history_placeholder.empty()
+        _render_history(history_placeholder, thread)
+
+
+def on_new_thread(history_placeholder: DeltaGenerator, memory: AgentMemory):
+    id = memory.new_thread()
+
+    st.session_state["thread_id"] = id
+    st.session_state["query_input"] = ""
+
+    if history_placeholder:
+        _ = history_placeholder.empty()
+
+
+def _render_memory_history(
+    placeholder: DeltaGenerator,
+    history_placeholder: DeltaGenerator | None,
+    memory: AgentMemory,
+) -> None:
     """Render memory history in the sidebar placeholder."""
     with placeholder.container():
-        if memory.entries:
-            _ = st.markdown("---")
-            _ = st.markdown("### 🧠 Historia sesji")
-            for i, e in enumerate(memory.entries[0]):
-                short_q = e.query[:40] + ("…" if len(e.query) > 40 else "")
-                with st.expander(f"{i + 1}. {short_q}", expanded=False):
-                    if e.decomposition_summary:
-                        _ = st.caption(f"_{e.decomposition_summary}_")
-                    if e.top_signatures:
-                        _ = st.caption(
-                            "📋 " + " · ".join(f"`{s}`" for s in e.top_signatures[:3])
-                        )
-                    if e.top_articles:
-                        _ = st.caption("📜 " + " · ".join(e.top_articles))
-                    if e.answer_snippet:
-                        _ = st.caption(e.answer_snippet[:200] + "…")
-        else:
-            # Optional: show message when empty
+        _ = st.markdown("---")
+        _ = st.markdown("### 🧠 Historia sesji")
+        for i, thread in enumerate(memory.entries):
+            if not thread:
+                continue
+
+            short_q = thread[0].query[:40] + ("…" if len(thread[0].query) > 40 else "")
+
+            if st.button(
+                f"💬 {short_q}",
+                key=f"thread_{i}",
+                on_click=on_thread_select,
+                args=(history_placeholder, i, thread),
+            ):
+                pass
+
+        if st.button(
+            "Nowy wątek",
+            key="new_thread_btn",
+            on_click=on_new_thread,
+            args=(history_placeholder, memory),
+        ):
             pass
 
 
