@@ -68,7 +68,7 @@ class AgentMemory(BaseModel):
     max_entries: int = 5
 
     def add(self, entry: MemoryEntry, id: int | None = None) -> int:
-        if not id:
+        if id is None:
             id = self.new_thread()
 
         self.entries[id].append(entry)

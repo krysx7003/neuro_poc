@@ -10,6 +10,7 @@ Wymagania:
 """
 
 import time
+from typing import Any
 
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
@@ -33,10 +34,6 @@ from ui import (
     PAGE_HEADER_HTML,
     UODO_CSS,
     build_context,
-    render_act_article_card,
-    render_card,
-    render_decision_card,
-    render_gdpr_card,
 )
 
 
@@ -55,11 +52,26 @@ def main() -> None:
     if "thread_id" not in st.session_state:
         st.session_state["thread_id"] = None
 
+    if "use_llm" not in st.session_state:
+        st.session_state["use_llm"] = True
+
+    if "use_graph" not in st.session_state:
+        st.session_state["use_graph"] = True
+
+    if "agent_memory" not in st.session_state:
+        st.session_state["agent_memory"] = AgentMemory()
+
     history_placeholder = st.empty()
     _render_history(history_placeholder, None)
     answer_placeholder = st.empty()
     full_answer = ""
-    _ = _render_answer(answer_placeholder, full_answer)
+    _ = _render_answer(
+        answer_placeholder,
+        history_placeholder,
+        None,
+        "",
+        full_answer,
+    )
 
     # ── Sidebar ─────────────────────────────────────────────────────
     with st.sidebar:
@@ -93,7 +105,7 @@ def main() -> None:
         st.session_state["llm_api_key"] = api_key
 
         _ = st.markdown("---")
-        use_graph = st.toggle("Graf powiązań", value=True)
+        st.session_state["use_graph"] = st.toggle("Graf powiązań", value=True)
 
         _ = st.markdown("### 📂 Typ dokumentów")
         show_decisions = st.checkbox("Decyzje UODO", value=True)
@@ -114,10 +126,7 @@ def main() -> None:
         # ── Pamięć epizodyczna ───────────────────────────────────────
         memory_placeholder = st.empty()
 
-        if "agent_memory" not in st.session_state:
-            st.session_state["agent_memory"] = AgentMemory()
         memory: AgentMemory = st.session_state["agent_memory"]
-        _render_memory_history(memory_placeholder, history_placeholder, memory)
 
     # ── Filtry typów dokumentów ──────────────────────────────────
     doc_types = []
@@ -150,7 +159,9 @@ def main() -> None:
             label_visibility="collapsed",
         )
     with col_ai:
-        use_llm = st.checkbox("🤖 Użyj AI", value=True, key="use_llm_cb")
+        st.session_state["use_llm"] = st.checkbox(
+            "🤖 Użyj AI", value=True, key="use_llm_cb"
+        )
     with col_btn:
         search_btn = st.button("🔍 Szukaj", type="primary", use_container_width=True)
 
@@ -311,6 +322,8 @@ def main() -> None:
     if kw_filter.strip():
         filters["keyword"] = kw_filter.strip()
 
+    _render_memory_history(memory_placeholder, history_placeholder, memory)
+
     # ── Wyszukiwanie ─────────────────────────────────────────────
     effective_query = query
     if sig_filter.strip() and not query.strip():
@@ -325,112 +338,24 @@ def main() -> None:
         st.session_state["last_filters"] = str(filters)
 
         # Reasoning Step — dekompozycja PRZED wyszukiwaniem
-        decomp: QueryDecomposition | None = None
-        if use_llm and len(effective_query.split()) > 3:
-            with st.spinner("🧠 Analizuję pytanie..."):
-                decomp = decompose_query(effective_query)
-            if decomp and decomp.reasoning:
-                with st.expander(
-                    "🧠 Reasoning Step — jak zrozumiałem pytanie", expanded=False
-                ):
-                    _ = st.caption(f"**Typ zapytania:** {decomp.query_type.value}")
-                    _ = st.caption(f"**Rozumowanie:** {decomp.reasoning}")
-                    if decomp.search_keywords:
-                        _ = st.caption(
-                            "**Słowa kluczowe:** "
-                            + " · ".join(f"`{k}`" for k in decomp.search_keywords)
-                        )
-                    if decomp.gdpr_articles_hint:
-                        _ = st.caption(
-                            "**Wskazane artykuły RODO:** "
-                            + ", ".join(decomp.gdpr_articles_hint)
-                        )
-                    if decomp.uodo_act_articles_hint:
-                        _ = st.caption(
-                            "**Wskazane artykuły u.o.d.o.:** "
-                            + ", ".join(decomp.uodo_act_articles_hint)
-                        )
-                    if decomp.enriched_query != effective_query:
-                        _ = st.caption(
-                            f"**Wzbogacone zapytanie:** _{decomp.enriched_query}_"
-                        )
 
-        search_query = decomp.enriched_query if decomp else effective_query
-        if decomp and decomp.year_from_hint and "year_from" not in filters:
-            filters["year_from"] = decomp.year_from_hint
-        if decomp and decomp.year_to_hint and "year_to" not in filters:
-            filters["year_to"] = decomp.year_to_hint
-
-        with st.spinner("🔍 Wyszukuję..."):
-            t0 = time.time()
-            _tags: list[str] = []
-            sig_match = RE_QUERY_SIG.match(effective_query)
-            if sig_match:
-                sig_norm = sig_match.group(1).upper()
-                exact = fetch_by_signature(sig_norm)
-                if exact:
-                    exact["_source"] = "exact"
-                    exact["_score"] = 1.0
-                    docs = [exact]
-                    if use_graph:
-                        for rsig in exact.get("related_uodo_rulings", [])[:5]:
-                            rdoc = fetch_by_signature(rsig)
-                            if rdoc:
-                                rdoc["_source"] = "graph"
-                                rdoc["_score"] = 0.9
-                                docs.append(rdoc)
-                else:
-                    _ = st.warning(
-                        f"Nie znaleziono decyzji o sygnaturze **{sig_norm}** w bazie."
-                    )
-                    docs, _tags = hybrid_search(
-                        search_query, filters=filters, use_graph=use_graph
-                    )
-            else:
-                docs, _tags = hybrid_search(
-                    search_query, filters=filters, use_graph=use_graph
-                )
-            search_time = time.time() - t0
-
-        if not docs:
-            _ = st.warning(
-                "Nie znaleziono dokumentów. Spróbuj zmienić filtry lub sformułowanie."
-            )
-            return
-
-        decisions = [d for d in docs if d.get("doc_type") == "uodo_decision"]
-        act_arts = [d for d in docs if d.get("doc_type") == "legal_act_article"]
-        gdpr_docs = [
-            d for d in docs if d.get("doc_type") in ("gdpr_article", "gdpr_recital")
-        ]
-        graph_docs = [d for d in docs if d.get("_source") == "graph"]
-
-        _tag_info = f" · tag: `{kw_filter}`" if kw_filter.strip() else ""
-        _ = st.caption(
-            f"""Znaleziono {len(docs)} dokumentów 
-            ({len(decisions)} decyzji, {len(act_arts)} u.o.d.o., 
-            {len(gdpr_docs)} RODO, {len(graph_docs)} przez graf) · {search_time:.2f}s"""
-            + _tag_info
+        full_answer, decomp, search_query, docs = _render_answer(
+            answer_placeholder,
+            history_placeholder,
+            filters,
+            kw_filter,
+            effective_query,
         )
-        if _tags:
-            _ = st.caption("🏷️ Tagi: " + " · ".join(f"`{t}`" for t in _tags))
+        decisions: list[dict[str, Any]] = []
+        act_arts: list[dict[str, Any]] = []
+        if docs:
+            decisions, act_arts, gdpr_docs, graph_docs = get_doc_types(docs)
+        use_llm = st.session_state["use_llm"]
 
         if use_llm:
-            thread_id: int | None = st.session_state["thread_id"]
-            print(f"Thread id: {thread_id}")
-            context = build_context(
-                docs, effective_query, thread_id, filters=filters, memory=memory
-            )
-            thread = None
-
-            if thread_id:
-                thread = memory.entries[thread_id]
-
-            _render_history(history_placeholder, thread)
-
-            full_answer = _render_answer(answer_placeholder, effective_query, context)
-
-            if full_answer:
+            if full_answer and decomp and search_query:
+                thread_id: int | None = st.session_state["thread_id"]
+                print(f"Current thread id: {thread_id}")
                 entry = MemoryEntry(
                     query=effective_query,
                     enriched_query=search_query,
@@ -450,51 +375,155 @@ def main() -> None:
                 )
 
                 id = memory.add(entry, thread_id)
+
+                print(f"Added item to thread: {id}")
                 st.session_state["thread_id"] = id
 
-                _render_memory_history(memory_placeholder, history_placeholder, memory)
+        # _ = st.markdown(f"### 📋 Dokumenty ({len(docs)})")
+        # tabs = st.tabs(
+        #     [
+        #         f"Wszystkie ({len(docs)})",
+        #         f"Decyzje UODO ({len(decisions)})",
+        #         f"Ustawa u.o.d.o. ({len(act_arts)})",
+        #         f"RODO ({len(gdpr_docs)})",
+        #         f"Graf ({len(graph_docs)})",
+        #     ]
+        # )
+        #
+        # with tabs[0]:
+        #     for i, doc in enumerate(docs, 1):
+        #         render_card(doc, i)
+        # with tabs[1]:
+        #     if decisions:
+        #         for i, doc in enumerate(decisions, 1):
+        #             render_decision_card(doc, i)
+        #     else:
+        #         _ = st.info("Brak decyzji UODO dla tego zapytania.")
+        # with tabs[2]:
+        #     if act_arts:
+        #         for i, doc in enumerate(act_arts, 1):
+        #             render_act_article_card(doc, i)
+        #     else:
+        #         _ = st.info("Brak artykułów ustawy dla tego zapytania.")
+        # with tabs[3]:
+        #     if gdpr_docs:
+        #         for i, doc in enumerate(gdpr_docs, 1):
+        #             render_gdpr_card(doc, i)
+        #     else:
+        #         _ = st.info("Brak artykułów RODO dla tego zapytania.")
+        # with tabs[4]:
+        #     if graph_docs:
+        #         _ = st.info(
+        #             "Decyzje powiązane przez cytowania z wynikami semantic search."
+        #         )
+        #         for i, doc in enumerate(graph_docs, 1):
+        #             render_decision_card(doc, i)
+        #     else:
+        #         _ = st.info("Brak wyników z grafu powiązań.")
 
-        _ = st.markdown(f"### 📋 Dokumenty ({len(docs)})")
-        tabs = st.tabs(
-            [
-                f"Wszystkie ({len(docs)})",
-                f"Decyzje UODO ({len(decisions)})",
-                f"Ustawa u.o.d.o. ({len(act_arts)})",
-                f"RODO ({len(gdpr_docs)})",
-                f"Graf ({len(graph_docs)})",
-            ]
-        )
 
-        with tabs[0]:
-            for i, doc in enumerate(docs, 1):
-                render_card(doc, i)
-        with tabs[1]:
-            if decisions:
-                for i, doc in enumerate(decisions, 1):
-                    render_decision_card(doc, i)
-            else:
-                _ = st.info("Brak decyzji UODO dla tego zapytania.")
-        with tabs[2]:
-            if act_arts:
-                for i, doc in enumerate(act_arts, 1):
-                    render_act_article_card(doc, i)
-            else:
-                _ = st.info("Brak artykułów ustawy dla tego zapytania.")
-        with tabs[3]:
-            if gdpr_docs:
-                for i, doc in enumerate(gdpr_docs, 1):
-                    render_gdpr_card(doc, i)
-            else:
-                _ = st.info("Brak artykułów RODO dla tego zapytania.")
-        with tabs[4]:
-            if graph_docs:
-                _ = st.info(
-                    "Decyzje powiązane przez cytowania z wynikami semantic search."
+def _render_analysing(
+    effective_query: str,
+) -> QueryDecomposition:
+    decomp: QueryDecomposition | None = None
+    _ = st.markdown(effective_query)
+
+    with st.spinner("🧠 Analizuję pytanie..."):
+        decomp = decompose_query(effective_query)
+
+    if decomp and decomp.reasoning:
+        with st.expander("🧠 Reasoning Step — jak zrozumiałem pytanie", expanded=False):
+            _ = st.caption(f"**Typ zapytania:** {decomp.query_type.value}")
+            _ = st.caption(f"**Rozumowanie:** {decomp.reasoning}")
+            if decomp.search_keywords:
+                _ = st.caption(
+                    "**Słowa kluczowe:** "
+                    + " · ".join(f"`{k}`" for k in decomp.search_keywords)
                 )
-                for i, doc in enumerate(graph_docs, 1):
-                    render_decision_card(doc, i)
+            if decomp.gdpr_articles_hint:
+                _ = st.caption(
+                    "**Wskazane artykuły RODO:** "
+                    + ", ".join(decomp.gdpr_articles_hint)
+                )
+            if decomp.uodo_act_articles_hint:
+                _ = st.caption(
+                    "**Wskazane artykuły u.o.d.o.:** "
+                    + ", ".join(decomp.uodo_act_articles_hint)
+                )
+            if decomp.enriched_query != effective_query:
+                _ = st.caption(f"**Wzbogacone zapytanie:** _{decomp.enriched_query}_")
+
+    return decomp
+
+
+def get_doc_types(
+    docs: list[dict[str, Any]],
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
+    decisions = [d for d in docs if d.get("doc_type") == "uodo_decision"]
+    act_arts = [d for d in docs if d.get("doc_type") == "legal_act_article"]
+    gdpr_docs = [
+        d for d in docs if d.get("doc_type") in ("gdpr_article", "gdpr_recital")
+    ]
+    graph_docs = [d for d in docs if d.get("_source") == "graph"]
+
+    return decisions, act_arts, gdpr_docs, graph_docs
+
+
+def _render_searching(
+    effective_query: str,
+    search_query: str,
+    filters: dict[str, Any] | None,
+    use_graph: bool,
+    kw_filter: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    with st.spinner("🔍 Wyszukuję..."):
+        t0 = time.time()
+        _tags: list[str] = []
+        sig_match = RE_QUERY_SIG.match(effective_query)
+        if sig_match:
+            sig_norm = sig_match.group(1).upper()
+            exact = fetch_by_signature(sig_norm)
+            if exact:
+                exact["_source"] = "exact"
+                exact["_score"] = 1.0
+                docs = [exact]
+                if use_graph:
+                    for rsig in exact.get("related_uodo_rulings", [])[:5]:
+                        rdoc = fetch_by_signature(rsig)
+                        if rdoc:
+                            rdoc["_source"] = "graph"
+                            rdoc["_score"] = 0.9
+                            docs.append(rdoc)
             else:
-                _ = st.info("Brak wyników z grafu powiązań.")
+                _ = st.warning(
+                    f"Nie znaleziono decyzji o sygnaturze **{sig_norm}** w bazie."
+                )
+                docs, _tags = hybrid_search(
+                    search_query, filters=filters, use_graph=use_graph
+                )
+        else:
+            docs, _tags = hybrid_search(
+                search_query, filters=filters, use_graph=use_graph
+            )
+        search_time = time.time() - t0
+
+        decisions, act_arts, gdpr_docs, graph_docs = get_doc_types(docs)
+        _tag_info = f" · tag: `{kw_filter}`" if kw_filter.strip() else ""
+        _ = st.caption(
+            f"""Znaleziono {len(docs)} dokumentów 
+            ({len(decisions)} decyzji, {len(act_arts)} u.o.d.o., 
+            {len(gdpr_docs)} RODO, {len(graph_docs)} przez graf) · {search_time:.2f}s"""
+            + _tag_info
+        )
+        if _tags:
+            _ = st.caption("🏷️ Tagi: " + " · ".join(f"`{t}`" for t in _tags))
+
+    return docs, _tags
 
 
 def _render_history(
@@ -515,13 +544,55 @@ def _render_history(
 
 def _render_answer(
     placeholder: DeltaGenerator,
+    history_placeholder: DeltaGenerator,
+    filters: dict[str, Any] | None,
+    kw_filter: str,
     effective_query: str | None = None,
-    context: str | None = None,
-) -> str | None:
+) -> tuple[
+    str | None, QueryDecomposition | None, str | None, list[dict[str, Any]] | None
+]:
     with placeholder.container(horizontal_alignment="right"):
-        if effective_query and context:
+        thread_id: int | None = st.session_state["thread_id"]
+        use_llm: bool = st.session_state["use_llm"]
+        use_graph: bool = st.session_state["use_graph"]
+        memory: AgentMemory = st.session_state["agent_memory"]
+
+        thread = None
+
+        if thread_id is not None:
+            thread = memory.entries[thread_id]
+
+        _render_history(history_placeholder, thread)
+
+        if effective_query and filters:
+            decomp: QueryDecomposition | None = None
             with st.container(border=True, width="content"):
-                _ = st.markdown(effective_query)
+                if use_llm and len(effective_query.split()) > 3:
+                    decomp = _render_analysing(effective_query)
+
+                search_query = decomp.enriched_query if decomp else effective_query
+                if decomp and decomp.year_from_hint and "year_from" not in filters:
+                    filters["year_from"] = decomp.year_from_hint
+                if decomp and decomp.year_to_hint and "year_to" not in filters:
+                    filters["year_to"] = decomp.year_to_hint
+
+                docs, _tags = _render_searching(
+                    effective_query,
+                    search_query,
+                    filters,
+                    use_graph,
+                    kw_filter,
+                )
+
+            if not docs:
+                _ = st.warning(
+                    "Nie znaleziono dokumentów. Spróbuj zmienić filtry lub sformułowanie."
+                )
+                return None, None, None, None
+
+            context = build_context(
+                docs, effective_query, thread_id, filters=filters, memory=memory
+            )
 
             try:
                 answer = ""
@@ -532,12 +603,13 @@ def _render_answer(
 
                     with answer_placeholder.container(border=True):
                         _ = st.markdown(answer)
-                return answer
+                return answer, decomp, search_query, docs
+
             except Exception as e:
                 _ = st.error(f"Błąd LLM: {e}")
-                return None
+                return None, None, None, None
         else:
-            return None
+            return None, None, None, None
 
 
 def on_thread_select(
