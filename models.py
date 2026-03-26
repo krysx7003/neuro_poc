@@ -9,6 +9,7 @@ Wzorce z kursu Software 3.0:
 
 import re
 from enum import Enum
+from typing import Any
 
 from jinja2 import Environment
 from pydantic import BaseModel, Field
@@ -49,15 +50,39 @@ class QueryDecomposition(BaseModel):
     )
 
 
+class SearchResult(BaseModel):
+    full: list[dict[str, Any]]
+    decisions: list[dict[str, Any]]
+    act_arts: list[dict[str, Any]]
+    gdpr_docs: list[dict[str, Any]]
+    graph_docs: list[dict[str, Any]]
+    tags: list[str]
+    search_time: float
+
+    @classmethod
+    def from_docs(
+        cls, docs: list[dict[str, Any]], tags: list[str], time: float
+    ) -> "SearchResult":
+        return cls(
+            full=docs,
+            decisions=[d for d in docs if d.get("doc_type") == "uodo_decision"],
+            act_arts=[d for d in docs if d.get("doc_type") == "legal_act_article"],
+            gdpr_docs=[
+                d for d in docs if d.get("doc_type") in ("gdpr_article", "gdpr_recital")
+            ],
+            graph_docs=[d for d in docs if d.get("_source") == "graph"],
+            tags=tags,
+            search_time=time,
+        )
+
+
 class MemoryEntry(BaseModel):
     """Wpis w pamięci epizodycznej."""
 
     query: str
     enriched_query: str
-    decomposition_summary: str
-    top_signatures: list[str] = []  # sygnatury top decyzji
-    top_articles: list[str] = []  # numery artykułów
-    answer_snippet: str = ""  # pierwsze 300 znaków odpowiedzi AI
+    decomp: QueryDecomposition
+    search_result: SearchResult
     full_answer: str = ""
 
 
