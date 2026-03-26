@@ -22,7 +22,12 @@ from config import (
     RE_QUERY_SIG,
 )
 from llm import call_llm_stream, decompose_query, get_available_models
-from models import AgentMemory, MemoryEntry, QueryDecomposition
+from models import (
+    AgentMemory,
+    MemoryEntry,
+    QueryDecomposition,
+    SearchResult,
+)
 from search import (
     fetch_by_signature,
     get_all_tags,
@@ -61,14 +66,18 @@ def main() -> None:
     if "agent_memory" not in st.session_state:
         st.session_state["agent_memory"] = AgentMemory()
 
+    if "last_query" not in st.session_state:
+        st.session_state["last_query"] = ""
+    if "last_filters" not in st.session_state:
+        st.session_state["last_filters"] = []
+
     history_placeholder = st.empty()
-    _render_history(history_placeholder, None)
     answer_placeholder = st.empty()
+
     full_answer = ""
     _ = _render_answer(
         answer_placeholder,
         history_placeholder,
-        None,
         "",
         full_answer,
     )
@@ -104,6 +113,10 @@ def main() -> None:
         st.session_state["llm_model"] = selected_model
         st.session_state["llm_api_key"] = api_key
 
+        # ── Pamięć epizodyczna ───────────────────────────────────────
+        memory_placeholder = st.empty()
+        memory: AgentMemory = st.session_state["agent_memory"]
+
         _ = st.markdown("---")
         st.session_state["use_graph"] = st.toggle("Graf powiązań", value=True)
 
@@ -122,11 +135,6 @@ def main() -> None:
                 st.metric("Powiązania w grafie", stats.get("edges", 0))
         except Exception:
             pass
-
-        # ── Pamięć epizodyczna ───────────────────────────────────────
-        memory_placeholder = st.empty()
-
-        memory: AgentMemory = st.session_state["agent_memory"]
 
     # ── Filtry typów dokumentów ──────────────────────────────────
     doc_types = []
@@ -295,7 +303,7 @@ def main() -> None:
                 st.rerun()
 
     # ── Budowanie słownika filtrów ───────────────────────────────
-    filters: dict = {"doc_types": doc_types}
+    filters: dict[str, Any] = {"doc_types": doc_types}
     if "uodo_decision" in doc_types:
         if status_filter != "— wszystkie —":
             filters["status"] = status_filter
@@ -322,7 +330,8 @@ def main() -> None:
     if kw_filter.strip():
         filters["keyword"] = kw_filter.strip()
 
-    _render_memory_history(memory_placeholder, history_placeholder, memory)
+    # Odświerz listę wątków
+    _render_memory(memory_placeholder, history_placeholder, memory)
 
     # ── Wyszukiwanie ─────────────────────────────────────────────
     effective_query = query
@@ -332,52 +341,17 @@ def main() -> None:
     if effective_query and (
         search_btn
         or st.session_state.get("last_query") != effective_query
-        or st.session_state.get("last_filters") != str(filters)
+        or st.session_state.get("last_filters") != filters
     ):
         st.session_state["last_query"] = effective_query
-        st.session_state["last_filters"] = str(filters)
+        st.session_state["last_filters"] = filters
 
-        # Reasoning Step — dekompozycja PRZED wyszukiwaniem
-
-        full_answer, decomp, search_query, docs = _render_answer(
+        _render_answer(
             answer_placeholder,
             history_placeholder,
-            filters,
             kw_filter,
             effective_query,
         )
-        decisions: list[dict[str, Any]] = []
-        act_arts: list[dict[str, Any]] = []
-        if docs:
-            decisions, act_arts, gdpr_docs, graph_docs = get_doc_types(docs)
-        use_llm = st.session_state["use_llm"]
-
-        if use_llm:
-            if full_answer and decomp and search_query:
-                thread_id: int | None = st.session_state["thread_id"]
-                print(f"Current thread id: {thread_id}")
-                entry = MemoryEntry(
-                    query=effective_query,
-                    enriched_query=search_query,
-                    decomposition_summary=decomp.reasoning if decomp else "",
-                    top_signatures=[
-                        d.get("signature", "")
-                        for d in decisions[:5]
-                        if d.get("signature")
-                    ],
-                    top_articles=[
-                        f"Art. {d.get('article_num')}"
-                        for d in act_arts[:3]
-                        if d.get("article_num")
-                    ],
-                    answer_snippet=full_answer[:300],
-                    full_answer=full_answer,
-                )
-
-                id = memory.add(entry, thread_id)
-
-                print(f"Added item to thread: {id}")
-                st.session_state["thread_id"] = id
 
         # _ = st.markdown(f"### 📋 Dokumenty ({len(docs)})")
         # tabs = st.tabs(
@@ -426,7 +400,6 @@ def _render_analysing(
     effective_query: str,
 ) -> QueryDecomposition:
     decomp: QueryDecomposition | None = None
-    _ = st.markdown(effective_query)
 
     with st.spinner("🧠 Analizuję pytanie..."):
         decomp = decompose_query(effective_query)
@@ -456,31 +429,14 @@ def _render_analysing(
     return decomp
 
 
-def get_doc_types(
-    docs: list[dict[str, Any]],
-) -> tuple[
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-]:
-    decisions = [d for d in docs if d.get("doc_type") == "uodo_decision"]
-    act_arts = [d for d in docs if d.get("doc_type") == "legal_act_article"]
-    gdpr_docs = [
-        d for d in docs if d.get("doc_type") in ("gdpr_article", "gdpr_recital")
-    ]
-    graph_docs = [d for d in docs if d.get("_source") == "graph"]
-
-    return decisions, act_arts, gdpr_docs, graph_docs
-
-
 def _render_searching(
     effective_query: str,
     search_query: str,
-    filters: dict[str, Any] | None,
-    use_graph: bool,
     kw_filter: str,
-) -> tuple[list[dict[str, Any]], list[str]]:
+) -> SearchResult:
+    use_graph: bool = st.session_state["use_graph"]
+    filters: dict[str, Any] = st.session_state["last_filters"]
+
     with st.spinner("🔍 Wyszukuję..."):
         t0 = time.time()
         _tags: list[str] = []
@@ -491,39 +447,40 @@ def _render_searching(
             if exact:
                 exact["_source"] = "exact"
                 exact["_score"] = 1.0
-                docs = [exact]
+                full_docs = [exact]
                 if use_graph:
                     for rsig in exact.get("related_uodo_rulings", [])[:5]:
                         rdoc = fetch_by_signature(rsig)
                         if rdoc:
                             rdoc["_source"] = "graph"
                             rdoc["_score"] = 0.9
-                            docs.append(rdoc)
+                            full_docs.append(rdoc)
             else:
                 _ = st.warning(
                     f"Nie znaleziono decyzji o sygnaturze **{sig_norm}** w bazie."
                 )
-                docs, _tags = hybrid_search(
+                full_docs, _tags = hybrid_search(
                     search_query, filters=filters, use_graph=use_graph
                 )
         else:
-            docs, _tags = hybrid_search(
+            full_docs, _tags = hybrid_search(
                 search_query, filters=filters, use_graph=use_graph
             )
         search_time = time.time() - t0
 
-        decisions, act_arts, gdpr_docs, graph_docs = get_doc_types(docs)
+        res = SearchResult.from_docs(full_docs, _tags, search_time)
+
         _tag_info = f" · tag: `{kw_filter}`" if kw_filter.strip() else ""
         _ = st.caption(
-            f"""Znaleziono {len(docs)} dokumentów 
-            ({len(decisions)} decyzji, {len(act_arts)} u.o.d.o., 
-            {len(gdpr_docs)} RODO, {len(graph_docs)} przez graf) · {search_time:.2f}s"""
+            f"""Znaleziono {len(res.full)} dokumentów 
+            ({len(res.decisions)} decyzji, {len(res.act_arts)} u.o.d.o., 
+            {len(res.gdpr_docs)} RODO, {len(res.graph_docs)} przez graf) · {res.search_time:.2f}s"""
             + _tag_info
         )
-        if _tags:
-            _ = st.caption("🏷️ Tagi: " + " · ".join(f"`{t}`" for t in _tags))
+        if res.tags:
+            _ = st.caption("🏷️ Tagi: " + " · ".join(f"`{t}`" for t in res.tags))
 
-    return docs, _tags
+    return res
 
 
 def _render_history(
@@ -534,7 +491,7 @@ def _render_history(
         if thread:
             for entry in thread:
                 with st.container(border=True, width="content"):
-                    _ = st.markdown(entry.query)
+                    _ = st.markdown(f"### Zapytanie \n{entry.query}\n ---")
 
                 with st.container(border=True):
                     _ = st.markdown(entry.full_answer)
@@ -545,20 +502,16 @@ def _render_history(
 def _render_answer(
     placeholder: DeltaGenerator,
     history_placeholder: DeltaGenerator,
-    filters: dict[str, Any] | None,
     kw_filter: str,
     effective_query: str | None = None,
-) -> tuple[
-    str | None, QueryDecomposition | None, str | None, list[dict[str, Any]] | None
-]:
+):
     with placeholder.container(horizontal_alignment="right"):
         thread_id: int | None = st.session_state["thread_id"]
         use_llm: bool = st.session_state["use_llm"]
-        use_graph: bool = st.session_state["use_graph"]
         memory: AgentMemory = st.session_state["agent_memory"]
+        filters: dict[str, Any] = st.session_state["last_filters"]
 
         thread = None
-
         if thread_id is not None:
             thread = memory.entries[thread_id]
 
@@ -568,6 +521,7 @@ def _render_answer(
             decomp: QueryDecomposition | None = None
             with st.container(border=True, width="content"):
                 if use_llm and len(effective_query.split()) > 3:
+                    _ = st.markdown(f"### Zapytanie \n{effective_query}\n ---")
                     decomp = _render_analysing(effective_query)
 
                 search_query = decomp.enriched_query if decomp else effective_query
@@ -576,22 +530,19 @@ def _render_answer(
                 if decomp and decomp.year_to_hint and "year_to" not in filters:
                     filters["year_to"] = decomp.year_to_hint
 
-                docs, _tags = _render_searching(
+                res = _render_searching(
                     effective_query,
                     search_query,
-                    filters,
-                    use_graph,
                     kw_filter,
                 )
 
-            if not docs:
+            if not res.full:
                 _ = st.warning(
                     "Nie znaleziono dokumentów. Spróbuj zmienić filtry lub sformułowanie."
                 )
-                return None, None, None, None
 
             context = build_context(
-                docs, effective_query, thread_id, filters=filters, memory=memory
+                res.full, effective_query, thread_id, filters=filters, memory=memory
             )
 
             try:
@@ -603,13 +554,23 @@ def _render_answer(
 
                     with answer_placeholder.container(border=True):
                         _ = st.markdown(answer)
-                return answer, decomp, search_query, docs
+
+                if decomp:
+                    entry = MemoryEntry(
+                        query=effective_query,
+                        enriched_query=search_query,
+                        decomp=decomp,
+                        search_result=res,
+                        full_answer=answer,
+                    )
+
+                    print(f"Thread id: {thread_id}")
+                    id = memory.add(entry, thread_id)
+                    st.session_state["thread_id"] = id
+                st.rerun()
 
             except Exception as e:
                 _ = st.error(f"Błąd LLM: {e}")
-                return None, None, None, None
-        else:
-            return None, None, None, None
 
 
 def on_thread_select(
@@ -634,7 +595,7 @@ def on_new_thread(history_placeholder: DeltaGenerator, memory: AgentMemory):
         _ = history_placeholder.empty()
 
 
-def _render_memory_history(
+def _render_memory(
     placeholder: DeltaGenerator,
     history_placeholder: DeltaGenerator | None,
     memory: AgentMemory,
