@@ -17,6 +17,7 @@ except ImportError:
 
 # ── Qdrant ────────────────────────────────────────────────────────
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 COLLECTION_NAME = "uodo_decisions"
 GRAPH_PATH = os.getenv("UODO_GRAPH_PATH", "./uodo_graph.pkl")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "sdadas/mmlw-retrieval-roberta-large")
