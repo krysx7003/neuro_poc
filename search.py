@@ -20,6 +20,7 @@ from config import (
     GRAPH_PATH,
     MAX_ACT_DOCS,
     MAX_GDPR_DOCS,
+    QDRANT_API_KEY,
     QDRANT_URL,
     QUERY_STOPWORDS,
     TAXONOMY_STATIC,
@@ -31,7 +32,11 @@ from config import (
 
 @st.cache_resource
 def get_qdrant() -> QdrantClient:
-    return QdrantClient(url=QDRANT_URL, timeout=30)
+    print(f"QDRANT API KEY: {QDRANT_API_KEY}")
+    print(f"QDRANT URL: {QDRANT_URL}")
+    return QdrantClient(
+        url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30, cloud_inference=True
+    )
 
 
 @st.cache_resource
