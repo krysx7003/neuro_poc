@@ -471,14 +471,17 @@ def _render_searching(
         res = SearchResult.from_docs(full_docs, _tags, search_time)
 
         _tag_info = f" · tag: `{kw_filter}`" if kw_filter.strip() else ""
+        if res.tags:
+            with st.expander("🏷️ Tagi", expanded=False):
+                for t in res.tags:
+                    _ = st.caption(f"`{t}`")
+
         _ = st.caption(
             f"""Znaleziono {len(res.full)} dokumentów 
             ({len(res.decisions)} decyzji, {len(res.act_arts)} u.o.d.o., 
             {len(res.gdpr_docs)} RODO, {len(res.graph_docs)} przez graf) · {res.search_time:.2f}s"""
             + _tag_info
         )
-        if res.tags:
-            _ = st.caption("🏷️ Tagi: " + " · ".join(f"`{t}`" for t in res.tags))
 
     return res
 
@@ -491,9 +494,49 @@ def _render_history(
         if thread:
             for entry in thread:
                 with st.container(border=True, width="content"):
-                    _ = st.markdown(f"### Zapytanie \n{entry.query}\n ---")
+                    _ = st.markdown(f"#### Zapytanie: {entry.query}")
+
+                    decomp = entry.decomp
+                    with st.expander(
+                        "🧠 Reasoning Step — jak zrozumiałem pytanie", expanded=False
+                    ):
+                        _ = st.caption(f"**Typ zapytania:** {decomp.query_type.value}")
+                        _ = st.caption(f"**Rozumowanie:** {decomp.reasoning}")
+                        if decomp.search_keywords:
+                            _ = st.caption(
+                                "**Słowa kluczowe:** "
+                                + " · ".join(f"`{k}`" for k in decomp.search_keywords)
+                            )
+                        if decomp.gdpr_articles_hint:
+                            _ = st.caption(
+                                "**Wskazane artykuły RODO:** "
+                                + ", ".join(decomp.gdpr_articles_hint)
+                            )
+                        if decomp.uodo_act_articles_hint:
+                            _ = st.caption(
+                                "**Wskazane artykuły u.o.d.o.:** "
+                                + ", ".join(decomp.uodo_act_articles_hint)
+                            )
+                        if decomp.enriched_query:
+                            _ = st.caption(
+                                f"**Wzbogacone zapytanie:** _{decomp.enriched_query}_"
+                            )
+
+                    res = entry.search_result
+                    if res.tags:
+                        with st.expander("🏷️ Tagi", expanded=False):
+                            for t in res.tags:
+                                _ = st.caption(f"`{t}`")
+
+                    _ = st.caption(
+                        f"""Znaleziono {len(res.full)} dokumentów 
+                        ({len(res.decisions)} decyzji, {len(res.act_arts)} u.o.d.o., 
+                        {len(res.gdpr_docs)} RODO, {len(res.graph_docs)} przez graf) · {res.search_time:.2f}s"""
+                    )
 
                 with st.container(border=True):
+                    _ = st.markdown("## Odpowiedź:")
+                    _ = st.markdown("---")
                     _ = st.markdown(entry.full_answer)
         else:
             pass
@@ -521,7 +564,7 @@ def _render_answer(
             decomp: QueryDecomposition | None = None
             with st.container(border=True, width="content"):
                 if use_llm and len(effective_query.split()) > 3:
-                    _ = st.markdown(f"### Zapytanie \n{effective_query}\n ---")
+                    _ = st.markdown(f"#### Zapytanie: {effective_query}")
                     decomp = _render_analysing(effective_query)
 
                 search_query = decomp.enriched_query if decomp else effective_query
@@ -553,6 +596,8 @@ def _render_answer(
                     answer += chunk
 
                     with answer_placeholder.container(border=True):
+                        _ = st.markdown("## Odpowiedź:")
+                        _ = st.markdown("---")
                         _ = st.markdown(answer)
 
                 if decomp:
