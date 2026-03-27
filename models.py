@@ -9,6 +9,7 @@ Wzorce z kursu Software 3.0:
 
 import re
 from enum import Enum
+from typing import Any
 
 from jinja2 import Environment
 from pydantic import BaseModel, Field
@@ -49,34 +50,69 @@ class QueryDecomposition(BaseModel):
     )
 
 
+class SearchResult(BaseModel):
+    full: list[dict[str, Any]]
+    decisions: list[dict[str, Any]]
+    act_arts: list[dict[str, Any]]
+    gdpr_docs: list[dict[str, Any]]
+    graph_docs: list[dict[str, Any]]
+    tags: list[str]
+    search_time: float
+
+    @classmethod
+    def from_docs(
+        cls, docs: list[dict[str, Any]], tags: list[str], time: float
+    ) -> "SearchResult":
+        return cls(
+            full=docs,
+            decisions=[d for d in docs if d.get("doc_type") == "uodo_decision"],
+            act_arts=[d for d in docs if d.get("doc_type") == "legal_act_article"],
+            gdpr_docs=[
+                d for d in docs if d.get("doc_type") in ("gdpr_article", "gdpr_recital")
+            ],
+            graph_docs=[d for d in docs if d.get("_source") == "graph"],
+            tags=tags,
+            search_time=time,
+        )
+
+
 class MemoryEntry(BaseModel):
     """Wpis w pamięci epizodycznej."""
 
     query: str
     enriched_query: str
-    decomposition_summary: str
-    top_signatures: list[str] = []  # sygnatury top decyzji
-    top_articles: list[str] = []  # numery artykułów
-    answer_snippet: str = ""  # pierwsze 300 znaków odpowiedzi AI
+    decomp: QueryDecomposition
+    search_result: SearchResult
     full_answer: str = ""
 
 
 class AgentMemory(BaseModel):
     """Pamięć epizodyczna sesji — wzorzec z lekcji 2.1 Memory Engineering."""
 
-    entries: list[MemoryEntry] = []
+    entries: list[list[MemoryEntry]] = []
     max_entries: int = 5
 
-    def add(self, entry: MemoryEntry) -> None:
-        self.entries.insert(0, entry)
-        self.entries = self.entries[: self.max_entries]
+    def add(self, entry: MemoryEntry, id: int | None = None) -> int:
+        if id is None:
+            id = self.new_thread()
 
-    def find_related(self, query: str) -> list[MemoryEntry]:
+        self.entries[id].append(entry)
+
+        return id
+
+    def new_thread(self) -> int:
+        new_thread: list[MemoryEntry] = []
+        self.entries.append(new_thread)
+        id = len(self.entries) - 1
+
+        return id
+
+    def find_related(self, query: str, id: int) -> list[MemoryEntry]:
         """Prosta heurystyka: wpisy z co najmniej jednym wspólnym słowem kluczowym."""
         q_words = {w.lower() for w in re.split(r"\W+", query) if len(w) > 3}
         return [
             e
-            for e in self.entries
+            for e in self.entries[id]
             if q_words & {w.lower() for w in re.split(r"\W+", e.query) if len(w) > 3}
         ]
 
@@ -89,40 +125,40 @@ _JINJA_ENV = Environment(keep_trailing_newline=True)
 # Nagłówek jawnie wymienia WSZYSTKIE typy dokumentów — duże modele (kimi2.5, gpt-4o)
 # czytają go dosłownie i bez tej informacji traktują artykuły RODO jako jedyną treść.
 TPL_HEADER = _JINJA_ENV.from_string(
-    "Poniżej znajdują się dokumenty powiązane z pytaniem: «{{ query }}»\n"
-    "Zbiór zawiera trzy typy dokumentów:\n"
-    "  1. DECYZJE UODO — decyzje administracyjne Prezesa Urzędu Ochrony Danych Osobowych\n"
-    "  2. ARTYKUŁY u.o.d.o. — przepisy ustawy o ochronie danych osobowych (Dz.U. 2019 poz. 1781)\n"
-    "  3. ARTYKUŁY RODO — przepisy rozporządzenia (UE) 2016/679 (Dz.Urz. UE L 119/1)\n"
-    "Każdy dokument jest wyraźnie oznaczony typem w nagłówku bloku.\n"
-    "{% if filter_note %}{{ filter_note }}{% endif %}"
-    "{% if memory_note %}{{ memory_note }}{% endif %}"
-    "Odpowiadaj na podstawie poniższych dokumentów, ze szczególnym uwzględnieniem DECYZJI UODO.\n"
-    "Podawaj sygnatury decyzji [np. DKN.XXX.X.XXXX, ZSOŚS, i in.] i numery artykułów [np. Art. X u.o.d.o.].\n"
+    """Poniżej znajdują się dokumenty powiązane z pytaniem: «{{ query }}»\n
+    Zbiór zawiera trzy typy dokumentów:\n
+      1. DECYZJE UODO — decyzje administracyjne Prezesa Urzędu Ochrony Danych Osobowych\n
+      2. ARTYKUŁY u.o.d.o. — przepisy ustawy o ochronie danych osobowych (Dz.U. 2019 poz. 1781)\n
+      3. ARTYKUŁY RODO — przepisy rozporządzenia (UE) 2016/679 (Dz.Urz. UE L 119/1)\n
+    Każdy dokument jest wyraźnie oznaczony typem w nagłówku bloku.\n
+    {% if filter_note %}{{ filter_note }}{% endif %}
+    {% if memory_note %}{{ memory_note }}{% endif %}
+    Odpowiadaj na podstawie poniższych dokumentów, ze szczególnym uwzględnieniem DECYZJI UODO.\n
+    Podawaj sygnatury decyzji [np. DKN.XXX.X.XXXX, ZSOŚS, i in.] i numery artykułów [np. Art. X u.o.d.o.].\n"""
 )
 
 TPL_DECISION = _JINJA_ENV.from_string(
-    "[{{ rank }}] DECYZJA UODO {{ sig }} ({{ date }}, {{ status }})"
-    "{% if graph_rel %} [powiązana: {{ graph_rel }}]{% endif %}\n\n"
-    "  SYGNATURA:    {{ sig }}\n"
-    "  DATA:         {{ date }}\n"
-    "  STATUS:       {{ status }}\n"
-    "{% if keywords %}  TAGI:         {{ keywords }}\n{% endif %}"
-    "{% if acts %}  POWOŁANE AKTY: {{ acts }}\n{% endif %}"
-    "  TREŚĆ:\n{{ fragment }}\n"
+    """[{{ rank }}] DECYZJA UODO {{ sig }} ({{ date }}, {{ status }})
+    {% if graph_rel %} [powiązana: {{ graph_rel }}]{% endif %}\n\n
+      SYGNATURA:    {{ sig }}\n
+      DATA:         {{ date }}\n
+      STATUS:       {{ status }}\n
+    {% if keywords %}  TAGI:         {{ keywords }}\n{% endif %}
+    {% if acts %}  POWOŁANE AKTY: {{ acts }}\n{% endif %}
+      TREŚĆ:\n{{ fragment }}\n"""
 )
 
 TPL_ACT_ARTICLE = _JINJA_ENV.from_string(
-    "[{{ rank }}] USTAWA o ochronie danych osobowych — Art. {{ art_num }}"
-    "{% if label_suffix %} {{ label_suffix }}{% endif %}\n\n"
-    "  ŹRÓDŁO: Dz.U. 2019 poz. 1781 (u.o.d.o.)\n"
-    "  TREŚĆ:\n{{ text }}\n"
+    """[{{ rank }}] USTAWA o ochronie danych osobowych — Art. {{ art_num }}
+    {% if label_suffix %} {{ label_suffix }}{% endif %}\n\n
+      ŹRÓDŁO: Dz.U. 2019 poz. 1781 (u.o.d.o.)\n
+      TREŚĆ:\n{{ text }}\n"""
 )
 
 TPL_GDPR = _JINJA_ENV.from_string(
-    "[{{ rank }}] RODO (rozporządzenie 2016/679) — {{ prefix }}\n\n"
-    "  ŹRÓDŁO: Dz.Urz. UE L 119/1\n"
-    "  TREŚĆ:\n{{ text }}\n"
+    """[{{ rank }}] RODO (rozporządzenie 2016/679) — {{ prefix }}\n\n
+      ŹRÓDŁO: Dz.Urz. UE L 119/1\n
+      TREŚĆ:\n{{ text }}\n"""
 )
 
 # Kolejność typów w kontekście LLM: decyzje UODO pierwsze, RODO ostatnie

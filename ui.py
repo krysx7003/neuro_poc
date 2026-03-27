@@ -17,27 +17,6 @@ from models import (
     AgentMemory,
 )
 
-# ─────────────────────────── CSS PORTALU UODO ────────────────────
-# uodo-blue-10: #f5f8f8;
-# --uodo-blue-20: #e8f1fd;
-# --uodo-blue-30: #dde3ee; Outline
-# --uodo-blue-33: #a5b3dd;
-# --uodo-blue-35: #6d83cc;
-# --uodo-blue-38: #356bcc;
-# --uodo-blue-40: #0058cc;
-# --uodo-blue-50: #275faa;
-# --uodo-blue-60: #0e4591; Przycisk szukaj/background sidebara
-# --uodo-blue-80: #092e60;
-# --uodo-dark-gray: #3f444f;
-# --uodo-light-gray: #c8ccd3;
-# --uodo-red: #f25a5a;
-# --uodo-red-logo: #cd071e;
-# --uodo-red-dark: #b22222;
-# --uodo-white: #fff;
-# --uodo-black: rgba(26,26,28,1);
-# --body-color: rgba(26,26,28,1);
-# --content-width: 1070px;
-
 UODO_CSS = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700;800&display=swap');
@@ -137,6 +116,7 @@ def _extract_fragment(content: str, query: str, max_len: int = 2000) -> str:
 def build_context(
     docs: list[dict[str, Any]],
     query: str,
+    thread_id: int | None,
     max_chars: int = 18000,
     filters: dict[str, Any] | None = None,
     memory: AgentMemory | None = None,
@@ -168,8 +148,11 @@ def build_context(
     )
 
     memory_note = ""
-    if memory:
-        related = memory.find_related(query)
+
+    print("Generating memory context")
+    if memory and thread_id:
+        print("Memory and thread_id exist")
+        related = memory.find_related(query, thread_id)
         if related:
             snippets = [
                 f"- Poprzednie pytanie: «{e.query}» → znalezione decyzje: "
@@ -181,6 +164,8 @@ def build_context(
                 + "\n".join(snippets)
                 + "\n"
             )
+
+        print(f"Context {related}")
 
     header = TPL_HEADER.render(
         query=query, filter_note=filter_note, memory_note=memory_note
