@@ -410,11 +410,65 @@ def render_gdpr_card(doc: dict[str, Any], rank: int) -> None:
         unsafe_allow_html=True,
     )
 
+def render_nsa_card(doc: dict[str, Any], rank: int) -> None:
+    """Render NSA judgment card matching other card styles."""
+    sig = doc.get("signature", "?")
+    year = doc.get("year", "")
+    court = doc.get("court", "N/A")
+    judges = doc.get("judges", [])
+    title = doc.get("title", "")
+    date = doc.get("date_issued", "")
+    score = doc.get("_score", 0)
+    
+    # Format judges (short)
+    judges_str = ", ".join(judges[:2])
+    if len(judges) > 2:
+        judges_str += " ..."
+    
+    # Simple NSA URL (local file reference)
+    nsa_url = f"file://{doc.get('source_file', '')}"
+    
+    # Format date like UODO cards
+    date_fmt = date[:10] if date else ""
+    
+    st.markdown(f"""
+    <article class="doc-list-item">
+      <header>
+        <a href="{nsa_url}" target="_blank">{sig}</a>
+        <time><small>NSA {year}</small></time>
+      </header>
+      <main>
+        <h2 class="d-flex justify-content-between align-items-start gap-2">
+          <span>{title[:280]}{"…" if len(title) > 280 else ""}</span>
+          <span class="status-badge status-final">NSA</span>
+        </h2>
+        <div>
+          <small class="text-muted">
+            Sąd: {court} | Sędziowie: {judges_str}
+          </small>
+        </div>
+        <p class="text-muted">
+          Tezy: {doc.get("summary", "")[:250]}{"…" if len(doc.get("summary", "")) > 250 else ""}
+        </p>
+      </main>
+      <footer><small class="text-muted">score: {score:.3f}</small></footer>
+    </article>""", 
+    unsafe_allow_html=True
+    )
+    
+    # Related acts (same as other cards)
+    with st.container():
+        all_acts = doc.get("related_acts", [])
+        if all_acts:
+            st.caption("📜 Powołane akty: " + " · ".join(f"`{a}`" for a in all_acts[:4]))
+    st.divider()
 
 def render_card(doc: dict[str, Any], rank: int) -> None:
     """Dispatcher — wybiera typ karty na podstawie doc_type."""
     dtype = doc.get("doc_type", "")
-    if dtype == "legal_act_article":
+    if dtype == "nsa_judgment":
+        render_nsa_card(doc, rank)
+    elif dtype == "legal_act_article":
         render_act_article_card(doc, rank)
     elif dtype in ("gdpr_article", "gdpr_recital"):
         render_gdpr_card(doc, rank)

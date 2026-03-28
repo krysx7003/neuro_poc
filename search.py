@@ -411,6 +411,7 @@ def hybrid_search(
     decisions: list[dict[str, Any]] = []
     act_docs: list[dict[str, Any]] = []
     gdpr_docs: list[dict[str, Any]] = []
+    nsa_docs: list[dict[str, Any]] = []
 
     def _add(bucket: list, doc: dict) -> bool:
         key = doc_key(doc)
@@ -526,9 +527,32 @@ def hybrid_search(
             _add(gdpr_docs, d)
 
     # ═══════════════════════════════════════════════════════════════
-    # Złącz: decyzje pierwsze, u.o.d.o., RODO
+    # ORZECZENIA NSA — max 20
     # ═══════════════════════════════════════════════════════════════
-    merged = decisions + act_docs + gdpr_docs
+
+    if explicit_keyword:
+        for d in keyword_exact_search(
+            explicit_keyword, {**filters_base, "doc_types": ["nsa_judgment"]}
+        ):
+            if len(nsa_docs) >= 20:
+                break
+            _add(nsa_docs, d)
+
+    if len(nsa_docs) < 20:
+        for d in semantic_search(
+            query,
+            top_k=20 - len(nsa_docs),
+            filters={**filters_base, "doc_types": ["nsa_judgment"]},
+            score_threshold=0.25,
+        ):
+            if len(nsa_docs) >= 20:
+                break
+            _add(nsa_docs, d)
+
+    # ═══════════════════════════════════════════════════════════════
+    # Złącz: decyzje pierwsze, u.o.d.o., RODO, NSA
+    # ═══════════════════════════════════════════════════════════════
+    merged = decisions + act_docs + gdpr_docs + nsa_docs
 
     if not use_graph or not decisions:
         return merged, matched_tags
@@ -562,6 +586,8 @@ def get_collection_stats() -> dict[str, Any]:
 
     decision_count = 0
     act_chunk_count = 0
+    nsa_count = 0
+    gdpr_count = 0
     offset = None
     while True:
         pts, next_off = client.scroll(
@@ -577,6 +603,10 @@ def get_collection_stats() -> dict[str, Any]:
                 decision_count += 1
             elif dtype == "legal_act_article":
                 act_chunk_count += 1
+            elif dtype == "nsa_judgment":
+                nsa_count += 1
+            elif dtype in ("gdpr_article", "gdpr_recital"):
+                gdpr_count += 1
         if next_off is None:
             break
         offset = next_off
@@ -597,5 +627,7 @@ def get_collection_stats() -> dict[str, Any]:
         "total": total,
         "decisions": decision_count,
         "act_chunks": act_chunk_count,
+        "nsa_judgments": nsa_count,
+        "gdpr_docs": gdpr_count,
         **graph_stats,
     }
