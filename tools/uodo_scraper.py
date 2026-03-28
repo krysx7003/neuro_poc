@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-UODO API Scraper — pobiera orzeczenia UODO przez REST API portalu.
+"""UODO API Scraper — pobiera orzeczenia UODO przez REST API portalu.
 
 Nie wymaga przeglądarki headless — tylko: pip install requests
 
@@ -18,7 +17,6 @@ import json
 import os
 import re
 import time
-from typing import Dict, List, Optional
 
 import requests
 from requests.auth import HTTPBasicAuth
@@ -41,7 +39,7 @@ SEARCH_FIELDS = "id,refid,refname,keywords,title_pl,date_announcement,date_publi
 # ─────────────────────────── HTTP ────────────────────────────────
 
 
-def make_session(user: str = None, password: str = None) -> requests.Session:
+def make_session(user: str | None = None, password: str | None = None) -> requests.Session:
     s = requests.Session()
     if user and password:
         s.auth = HTTPBasicAuth(user, password)
@@ -50,8 +48,8 @@ def make_session(user: str = None, password: str = None) -> requests.Session:
 
 
 def get(
-    session: requests.Session, url: str, retries: int = MAX_RETRIES, accept: str = None
-) -> Optional[requests.Response]:
+    session: requests.Session, url: str, retries: int = MAX_RETRIES, accept: str | None = None
+) -> requests.Response | None:
     headers = {"Accept": accept} if accept else {}
     for attempt in range(retries):
         try:
@@ -75,10 +73,10 @@ def get(
 
 
 def fetch_document_list(
-    session: requests.Session, date_from: str = None, date_to: str = None
-) -> List[Dict]:
-    """
-    Pobiera listę wszystkich dokumentów UODO z kluczowymi polami indeksu.
+    session: requests.Session, date_from: str | None = None, date_to: str | None = None
+) -> list[dict]:
+    """Pobiera listę wszystkich dokumentów UODO z kluczowymi polami indeksu.
+
     Jeden batch request zwraca keywords, title_pl, daty — bez osobnych żądań per dokument.
     """
     date_from = date_from or ""
@@ -121,7 +119,8 @@ def fetch_document_list(
 
 
 def refid_to_signature(refid: str) -> str:
-    """
+    """Przykładowe rfid.
+
     urn:ndoc:gov:pl:uodo:2025:dkn_5131_9  → DKN.5131.9.2025
     urn:ndoc:gov:pl:uodo:2024:dkn_5130_2  → DKN.5130.2.2024
     """
@@ -147,9 +146,8 @@ def multilang_str(field) -> str:
 # ─────────────────────────── PARSOWANIE meta.json ────────────────
 
 
-def parse_meta(data: Dict) -> Dict:
-    """
-    Parsuje meta.json.
+def parse_meta(data: dict) -> dict:
+    """Parsuje meta.json.
 
     Na podstawie metryki portalu pola to:
       name            — "Decyzja Prezesa UODO nr DKN.5131.12.2025"
@@ -237,9 +235,7 @@ def parse_meta(data: Dict) -> Dict:
     result["kind"] = data.get("kind", "")
 
     pub = data.get("publication", {})
-    result["pub_workflow_status"] = (
-        pub.get("status", "") if isinstance(pub, dict) else ""
-    )
+    result["pub_workflow_status"] = pub.get("status", "") if isinstance(pub, dict) else ""
 
     return result
 
@@ -247,9 +243,9 @@ def parse_meta(data: Dict) -> Dict:
 # ─────────────────────────── PARSOWANIE dates.json ───────────────
 
 
-def parse_dates(data) -> Dict[str, str]:
-    """
-    Parsuje dates.json (schema: date.yml).
+def parse_dates(data) -> dict[str, str]:
+    """Parsuje dates.json (schema: date.yml).
+
     use ∈ {initiation, announcement, publication, effect, notification,
             expiration, modification, other}
 
@@ -299,9 +295,9 @@ RELATION_TO_GRAPH = {
 }
 
 
-def parse_refs(data) -> Dict:
-    """
-    Parsuje refs z meta.json (pole refs[]).
+def parse_refs(data) -> dict:
+    """Parsuje refs z meta.json (pole refs[]).
+
     dates.json zwraca pusty body — nie używamy.
 
     Format (z surowego meta.json):
@@ -405,9 +401,7 @@ def parse_refs(data) -> Dict:
 
 # Wzorce do wyciągania powiązań z content_text gdy refs.json jest pusty
 _RE_DZ_U = re.compile(r"Dz\.\s*U\.\s*(?:z\s+)?(\d{4})\s+(?:r\.\s+)?poz\.\s+(\d+)")
-_RE_RODO = re.compile(
-    r"rozporządzeni[au]\s+(?:Parlamentu[^,]{0,60}?)?\(?(?:UE\s+)?2016/679"
-)
+_RE_RODO = re.compile(r"rozporządzeni[au]\s+(?:Parlamentu[^,]{0,60}?)?\(?(?:UE\s+)?2016/679")
 _RE_UODO_SIG = re.compile(r"\b(DKN|ZSPU|ZSZS|ZKE)\.\d{4}\.\d+\.\d{4}\b")
 _RE_DATE = re.compile(
     r"(?:z\s+dnia\s+|dnia\s+)(\d{1,2})\s+"
@@ -429,14 +423,12 @@ _MONTHS = {
     "grudnia": 12,
 }
 
-_RE_NSA = re.compile(
-    r"\b(I|II|III|IV|V|VI|VII)\s+[A-Z]{2,4}/[A-Za-z]{2,4}\s+\d+/\d{4}\b"
-)
+_RE_NSA = re.compile(r"\b(I|II|III|IV|V|VI|VII)\s+[A-Z]{2,4}/[A-Za-z]{2,4}\s+\d+/\d{4}\b")
 
 
 def extract_date_from_text(content: str) -> str:
-    """
-    Wyciąga datę wydania decyzji z treści.
+    """Wyciąga datę wydania decyzji z treści.
+
     Regex szuka dat z lat 2018+ (20[12]d) więc pomija daty historyczne
     z cytowań aktów (KPA 1960, KC 1964 itp.).
     Data decyzji jest w nagłówku — szukamy w pierwszych 500 znakach.
@@ -453,10 +445,8 @@ def extract_date_from_text(content: str) -> str:
     return ""
 
 
-def extract_refs_from_text(content: str, doc_own_sig: str = "") -> Dict:
-    """
-    Wyciąga powiązania z treści decyzji gdy API refs.json jest puste.
-    """
+def extract_refs_from_text(content: str, doc_own_sig: str = "") -> dict:
+    """Wyciąga powiązania z treści decyzji gdy API refs.json jest puste."""
     result = {
         "acts": [],
         "eu_acts": [],
@@ -557,8 +547,8 @@ _PUB_STATUS_MAP = {
 
 
 def extract_legal_status(keywords: str, pub_status: str) -> str:
-    """
-    Status prawny decyzji (prawomocna/nieprawomocna).
+    """Status prawny decyzji (prawomocna/nieprawomocna).
+
     Priorytet: pub_workflow_status > keywords.
     """
     if pub_status in _PUB_STATUS_MAP:
@@ -575,11 +565,10 @@ def extract_legal_status(keywords: str, pub_status: str) -> str:
 def fetch_decision(
     session: requests.Session,
     doc_id: str,
-    doc_fields: Dict,
+    doc_fields: dict,
     delay: float = DEFAULT_DELAY,
-) -> Dict:
-    """
-    Pobiera pełne dane orzeczenia.
+) -> dict:
+    """Pobiera pełne dane orzeczenia.
 
     doc_fields — dane z search: {id, refid, keywords, title_pl,
                                   date_announcement, date_publication}
@@ -633,9 +622,7 @@ def fetch_decision(
 
     # ── Dane z search ──────────────────────────────────────────
     kw_raw = doc_fields.get("keywords", "")
-    doc["keywords"] = (
-        ", ".join(kw_raw) if isinstance(kw_raw, list) else str(kw_raw or "")
-    )
+    doc["keywords"] = ", ".join(kw_raw) if isinstance(kw_raw, list) else str(kw_raw or "")
     doc["title"] = doc_fields.get("title_pl", "")
     # date_announcement z search = None w praktyce — pobierzemy z dates.json
 
@@ -686,9 +673,7 @@ def fetch_decision(
             doc["keywords_list"] = parsed["keywords_list"]
         else:
             # Fallback — sparsuj string z search
-            doc["keywords_list"] = [
-                k.strip() for k in doc["keywords"].split(",") if k.strip()
-            ]
+            doc["keywords_list"] = [k.strip() for k in doc["keywords"].split(",") if k.strip()]
 
         doc["entities"] = parsed["entities"]
         doc["kind"] = parsed["kind"]
@@ -702,9 +687,7 @@ def fetch_decision(
         if parsed["legal_status"]:
             doc["status"] = parsed["legal_status"]
         else:
-            doc["status"] = extract_legal_status(
-                doc["keywords"], doc["pub_workflow_status"]
-            )
+            doc["status"] = extract_legal_status(doc["keywords"], doc["pub_workflow_status"])
         # Taksonomia UODO
         doc["term_decision_type"] = parsed["term_decision_type"]
         doc["term_violation_type"] = parsed["term_violation_type"]
@@ -803,10 +786,7 @@ def fetch_decision(
         doc["refs_full"] = refs["refs_full"]
         doc["related_legislation"] = [
             {"type": "act", "signature": s, "relation": "quotes"} for s in refs["acts"]
-        ] + [
-            {"type": "eu_act", "signature": s, "relation": "implements"}
-            for s in refs["eu_acts"]
-        ]
+        ] + [{"type": "eu_act", "signature": s, "relation": "implements"} for s in refs["eu_acts"]]
         doc["related_rulings"] = [
             {"type": "uodo_ruling", "signature": s, "relation": "refers"}
             for s in refs["uodo_rulings"]
@@ -822,7 +802,7 @@ def fetch_decision(
     return doc
 
 
-def _find_relation(refs_full: List[Dict], signature: str) -> str:
+def _find_relation(refs_full: list[dict], signature: str) -> str:
     """Znajdź typ relacji dla danej sygnatury w refs_full."""
     for r in refs_full:
         if r.get("signature") == signature:
@@ -835,15 +815,16 @@ def _find_relation(refs_full: List[Dict], signature: str) -> str:
 
 def scrape_all(
     output_path: str,
-    user: str = None,
-    password: str = None,
+    user: str | None = None,
+    password: str | None = None,
     delay: float = DEFAULT_DELAY,
     resume: bool = True,
-    date_from: str = None,
-    date_to: str = None,
-    limit: int = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int | None = None,
 ):
-    session = make_session(user, password)
+    if user and password:
+        session = make_session(user, password)
 
     done = set()
     if resume and os.path.exists(output_path):
@@ -905,18 +886,14 @@ if __name__ == "__main__":
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--date-from", default=None, metavar="YYYY-MM-DD")
     parser.add_argument("--date-to", default=None, metavar="YYYY-MM-DD")
-    parser.add_argument(
-        "--test", action="store_true", help="Pobierz 3 dokumenty testowe"
-    )
+    parser.add_argument("--test", action="store_true", help="Pobierz 3 dokumenty testowe")
     args = parser.parse_args()
 
     if args.test:
         out = "uodo_test.jsonl"
         if os.path.exists(out):
             os.remove(out)
-        scrape_all(
-            out, args.user, args.password, delay=args.delay, resume=False, limit=3
-        )
+        scrape_all(out, args.user, args.password, delay=args.delay, resume=False, limit=3)
 
         print("\n=== WYNIKI TESTU ===")
         with open(out) as f:

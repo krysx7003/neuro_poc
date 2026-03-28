@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-"""
-UODO RAG Demo — wyszukiwarka decyzji Prezesa UODO + ustawa o ochronie danych osobowych.
+"""UODO RAG Demo — wyszukiwarka decyzji Prezesa UODO + ustawa o ochronie danych osobowych.
 
 Uruchomienie:
   streamlit run main.py
@@ -86,9 +84,7 @@ def main() -> None:
     with st.sidebar:
         _ = st.markdown("## ⚙️ Opcje")
 
-        provider = st.selectbox(
-            "Provider LLM", ["Ollama", "Groq"], key="provider_select"
-        )
+        provider = st.selectbox("Provider LLM", ["Ollama", "Groq"], key="provider_select")
 
         # Klucz API tylko dla Groq — Ollama używa OLLAMA_CLOUD_API_KEY z .env
         if provider == "Groq":
@@ -103,9 +99,7 @@ def main() -> None:
             _ = st.caption(f"🖥️ Ollama: `{OLLAMA_URL}`")
 
         models = get_available_models(provider, api_key)
-        default_model = (
-            DEFAULT_OLLAMA_MODEL if provider == "Ollama" else DEFAULT_GROQ_MODEL
-        )
+        default_model = DEFAULT_OLLAMA_MODEL if provider == "Ollama" else DEFAULT_GROQ_MODEL
         default_idx = next((i for i, m in enumerate(models) if default_model in m), 0)
         selected_model = st.selectbox("Model", models, index=default_idx)
 
@@ -167,9 +161,7 @@ def main() -> None:
             label_visibility="collapsed",
         )
     with col_ai:
-        st.session_state["use_llm"] = st.checkbox(
-            "🤖 Użyj AI", value=True, key="use_llm_cb"
-        )
+        st.session_state["use_llm"] = st.checkbox("🤖 Użyj AI", value=True, key="use_llm_cb")
     with col_btn:
         search_btn = st.button("🔍 Szukaj", type="primary", use_container_width=True)
 
@@ -177,18 +169,14 @@ def main() -> None:
     with st.expander("🔽 Filtry zaawansowane", expanded=False):
         fc1, fc2, fc3 = st.columns(3)
         with fc1:
-            _ = st.markdown(
-                '<div class="filter-label">Sygnatura</div>', unsafe_allow_html=True
-            )
+            _ = st.markdown('<div class="filter-label">Sygnatura</div>', unsafe_allow_html=True)
             sig_filter = st.text_input(
                 "Sygnatura",
                 placeholder="np. DKN.5110",
                 label_visibility="collapsed",
                 key="sig_filter",
             )
-            _ = st.markdown(
-                '<div class="filter-label">Status</div>', unsafe_allow_html=True
-            )
+            _ = st.markdown('<div class="filter-label">Status</div>', unsafe_allow_html=True)
             status_filter = st.selectbox(
                 "Status",
                 ["— wszystkie —", "prawomocna", "nieprawomocna", "uchylona"],
@@ -249,9 +237,7 @@ def main() -> None:
                 label_visibility="collapsed",
                 key="tax_violation",
             )
-            _ = st.markdown(
-                '<div class="filter-label">Sektor</div>', unsafe_allow_html=True
-            )
+            _ = st.markdown('<div class="filter-label">Sektor</div>', unsafe_allow_html=True)
             tax_sector = st.multiselect(
                 "Sektor",
                 options=taxonomy.get("term_sector", []),
@@ -410,18 +396,15 @@ def _render_analysing(
             _ = st.caption(f"**Rozumowanie:** {decomp.reasoning}")
             if decomp.search_keywords:
                 _ = st.caption(
-                    "**Słowa kluczowe:** "
-                    + " · ".join(f"`{k}`" for k in decomp.search_keywords)
+                    "**Słowa kluczowe:** " + " · ".join(f"`{k}`" for k in decomp.search_keywords)
                 )
             if decomp.gdpr_articles_hint:
                 _ = st.caption(
-                    "**Wskazane artykuły RODO:** "
-                    + ", ".join(decomp.gdpr_articles_hint)
+                    "**Wskazane artykuły RODO:** " + ", ".join(decomp.gdpr_articles_hint)
                 )
             if decomp.uodo_act_articles_hint:
                 _ = st.caption(
-                    "**Wskazane artykuły u.o.d.o.:** "
-                    + ", ".join(decomp.uodo_act_articles_hint)
+                    "**Wskazane artykuły u.o.d.o.:** " + ", ".join(decomp.uodo_act_articles_hint)
                 )
             if decomp.enriched_query != effective_query:
                 _ = st.caption(f"**Wzbogacone zapytanie:** _{decomp.enriched_query}_")
@@ -456,21 +439,16 @@ def _render_searching(
                             rdoc["_score"] = 0.9
                             full_docs.append(rdoc)
             else:
-                _ = st.warning(
-                    f"Nie znaleziono decyzji o sygnaturze **{sig_norm}** w bazie."
-                )
-                full_docs, _tags = hybrid_search(
-                    search_query, filters=filters, use_graph=use_graph
-                )
+                _ = st.warning(f"Nie znaleziono decyzji o sygnaturze **{sig_norm}** w bazie.")
+                full_docs, _tags = hybrid_search(search_query, filters=filters, use_graph=use_graph)
         else:
-            full_docs, _tags = hybrid_search(
-                search_query, filters=filters, use_graph=use_graph
-            )
+            full_docs, _tags = hybrid_search(search_query, filters=filters, use_graph=use_graph)
         search_time = time.time() - t0
 
         res = SearchResult.from_docs(full_docs, _tags, search_time)
 
         _tag_info = f" · tag: `{kw_filter}`" if kw_filter.strip() else ""
+
         if res.tags:
             with st.expander("🏷️ Tagi", expanded=False):
                 for t in res.tags:
@@ -497,9 +475,7 @@ def _render_history(
                     _ = st.markdown(f"#### Zapytanie: {entry.query}")
 
                     decomp = entry.decomp
-                    with st.expander(
-                        "🧠 Reasoning Step — jak zrozumiałem pytanie", expanded=False
-                    ):
+                    with st.expander("🧠 Reasoning Step — jak zrozumiałem pytanie", expanded=False):
                         _ = st.caption(f"**Typ zapytania:** {decomp.query_type.value}")
                         _ = st.caption(f"**Rozumowanie:** {decomp.reasoning}")
                         if decomp.search_keywords:
@@ -518,9 +494,7 @@ def _render_history(
                                 + ", ".join(decomp.uodo_act_articles_hint)
                             )
                         if decomp.enriched_query:
-                            _ = st.caption(
-                                f"**Wzbogacone zapytanie:** _{decomp.enriched_query}_"
-                            )
+                            _ = st.caption(f"**Wzbogacone zapytanie:** _{decomp.enriched_query}_")
 
                     res = entry.search_result
                     if res.tags:
@@ -621,7 +595,7 @@ def _render_answer(
 def on_thread_select(
     history_placeholder: DeltaGenerator, thread_id: int, thread: list[MemoryEntry]
 ):
-    """Callback when thread button is clicked"""
+    """Callback when thread button is clicked."""
     st.session_state["thread_id"] = thread_id
     st.session_state["query_input"] = ""
 
@@ -631,6 +605,7 @@ def on_thread_select(
 
 
 def on_new_thread(history_placeholder: DeltaGenerator, memory: AgentMemory):
+    """Callback when thr button is clicked."""
     id = memory.new_thread()
 
     st.session_state["thread_id"] = id

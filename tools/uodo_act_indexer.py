@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
-"""
-UODO Act Indexer — indeksuje ustawę o ochronie danych osobowych (Dz.U. 2019 poz. 1781)
-do tej samej kolekcji Qdrant co orzeczenia UODO.
+"""UODO Act Indexer — indeksuje ustawę o ochronie danych osobowych (Dz.U. 2019 poz. 1781) do tej samej kolekcji Qdrant co orzeczenia UODO.
 
 Każdy artykuł = osobny dokument (doc_type="legal_act_article").
 Długie artykuły są dzielone na chunki z zachłannym overlapem.
@@ -15,7 +12,7 @@ import argparse
 import hashlib
 import re
 import uuid
-from typing import Dict, List
+from typing import Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -26,11 +23,14 @@ from qdrant_client.models import (
 )
 from sentence_transformers import SentenceTransformer
 
-# ─────────────────────────── CONFIG ──────────────────────────────
+from config import (
+    COLLECTION_NAME,
+    EMBED_MODEL,
+    QDRANT_API_KEY,
+    QDRANT_URL,
+)
 
-QDRANT_URL = "http://localhost:6333"
-COLLECTION_NAME = "uodo_decisions"  # ta sama kolekcja co orzeczenia
-EMBED_MODEL = "sdadas/mmlw-retrieval-roberta-large"
+# ─────────────────────────── CONFIG ──────────────────────────────
 
 SIGNATURE = "Dz.U. 2019 poz. 1781"
 ACT_TITLE = "Ustawa z dnia 10 maja 2018 r. o ochronie danych osobowych"
@@ -49,9 +49,9 @@ BATCH_SIZE = 50
 # ─────────────────────────── PARSOWANIE MD ───────────────────────
 
 
-def parse_articles(md_path: str) -> List[Dict]:
-    """
-    Parsuje plik markdown i wyciąga artykuły 1–ART_MAX właściwej ustawy.
+def parse_articles(md_path: str) -> list[dict[str, Any]]:
+    """Parsuje plik markdown i wyciąga artykuły 1–ART_MAX właściwej ustawy.
+
     Pomija wstępne przepisy zmieniające (Art. 109–157 na początku pliku).
     Zwraca listę: {article_num, article_text, header_line}
     """
@@ -76,7 +76,7 @@ def parse_articles(md_path: str) -> List[Dict]:
     article_pattern = re.compile(r"(?=^Art\. (\d+)\.)", re.MULTILINE)
     parts = article_pattern.split(content)
 
-    articles = []
+    articles: list[dict[str, Any]] = []
     i = 0
     while i < len(parts):
         part = parts[i]
@@ -110,9 +110,9 @@ def parse_articles(md_path: str) -> List[Dict]:
     return articles
 
 
-def chunk_article(art: Dict) -> List[Dict]:
-    """
-    Dzieli długi artykuł na chunki. Krótkie artykuły zwracane jako jeden chunk.
+def chunk_article(art: dict[str, Any]) -> list[dict[str, Any]]:
+    """Dzieli długi artykuł na chunki. Krótkie artykuły zwracane jako jeden chunk.
+
     Każdy chunk dostaje indeks i informację o artykule.
     """
     text = art["article_text"]
@@ -123,7 +123,6 @@ def chunk_article(art: Dict) -> List[Dict]:
     # Staraj się nie rozrywać paragrafów
     chunks = []
     current = ""
-    chunk_idx = 0
 
     paragraphs = re.split(r"(\n(?=\d+\)|§|\-\s|[a-z]\)))", text)
 
@@ -135,16 +134,14 @@ def chunk_article(art: Dict) -> List[Dict]:
                 chunks.append(current.strip())
             # Overlap — weź ostatnie CHUNK_OVERLAP_CHARS z poprzedniego chunka
             overlap = (
-                current[-CHUNK_OVERLAP_CHARS:]
-                if len(current) > CHUNK_OVERLAP_CHARS
-                else current
+                current[-CHUNK_OVERLAP_CHARS:] if len(current) > CHUNK_OVERLAP_CHARS else current
             )
             current = overlap + para
 
     if current.strip():
         chunks.append(current.strip())
 
-    result = []
+    result: list[dict[str, Any]] = []
     for idx, chunk_text in enumerate(chunks):
         result.append(
             {
@@ -160,9 +157,9 @@ def chunk_article(art: Dict) -> List[Dict]:
 # ─────────────────────────── EMBEDDING ───────────────────────────
 
 
-def build_embed_text(chunk: Dict) -> str:
-    """
-    Tekst do embeddingu: kontekst aktu + numer artykułu + treść.
+def build_embed_text(chunk: dict[str, Any]) -> str:
+    """Tekst do embeddingu: kontekst aktu + numer artykułu + treść.
+
     Kontekst na początku daje wyższą wagę przy wyszukiwaniu.
     """
     art_num = chunk["article_num"]
@@ -187,9 +184,8 @@ def sig_to_uuid(key: str) -> str:
 
 def index_act(
     md_path: str,
-    qdrant_url: str = QDRANT_URL,
-    rebuild_act: bool = False,
-    device: str = None,
+    rebuild_act: bool | None = False,
+    device: str | None = None,
 ):
     import torch
 
@@ -200,7 +196,11 @@ def index_act(
     model = SentenceTransformer(EMBED_MODEL, device=device, trust_remote_code=True)
     dim = model.get_sentence_embedding_dimension()
 
-    client = QdrantClient(url=qdrant_url, timeout=60)
+    if dim is None:
+        print("Wymiar wektora nieznany")
+        exit()
+
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=60)
     existing = {c.name for c in client.get_collections().collections}
 
     # Utwórz kolekcję jeśli nie istnieje (ten sam schemat co uodo_indexer.py)
@@ -249,15 +249,12 @@ def index_act(
     for art in articles:
         all_chunks.extend(chunk_article(art))
 
-    print(
-        f"📝 Chunki do zaindeksowania: {len(all_chunks)} (z {len(articles)} artykułów)"
-    )
+    print(f"📝 Chunki do zaindeksowania: {len(all_chunks)} (z {len(articles)} artykułów)")
 
     to_index = [
         c
         for c in all_chunks
-        if f"uodo_act:{SIGNATURE}:art{c['article_num']}:chunk{c['chunk_index']}"
-        not in done_keys
+        if f"uodo_act:{SIGNATURE}:art{c['article_num']}:chunk{c['chunk_index']}" not in done_keys
     ]
     print(f"📝 Nowych: {len(to_index)}")
 
@@ -277,9 +274,7 @@ def index_act(
             doc_id = f"uodo_act:{SIGNATURE}:art{art_num}:chunk{chunk_idx}"
 
             try:
-                vec = model.encode(
-                    build_embed_text(chunk), normalize_embeddings=True
-                ).tolist()
+                vec = model.encode(build_embed_text(chunk), normalize_embeddings=True).tolist()
             except Exception as e:
                 print(f"  ⚠️ Embedding błąd Art. {art_num}: {e}")
                 errors += 1
@@ -348,4 +343,4 @@ if __name__ == "__main__":
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
 
-    index_act(args.md, args.qdrant, args.rebuild_act, args.device)
+    index_act(args.md, args.rebuild_act, args.device)

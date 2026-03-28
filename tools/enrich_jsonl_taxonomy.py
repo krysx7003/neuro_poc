@@ -1,15 +1,12 @@
-#!/usr/bin/env python3
-"""
-enrich_jsonl_taxonomy.py — wzbogaca istniejący JSONL o pola taksonomii
-z already pobranego pola meta.terms, bez ponownego scrapowania.
+"""enrich_jsonl_taxonomy.py — wzbogaca istniejący JSONL o pola taksonomii z already pobranego pola meta.terms, bez ponownego scrapowania.
 
 Użycie:
   python enrich_jsonl_taxonomy.py
   python enrich_jsonl_taxonomy.py --input uodo_decisions.jsonl --output uodo_decisions_enriched.jsonl
 """
+
 import argparse
 import json
-from pathlib import Path
 
 
 def parse_terms_taxonomy(terms: list) -> dict:
@@ -20,7 +17,7 @@ def parse_terms_taxonomy(terms: list) -> dict:
         "term_corrective_measure": [],
         "term_sector": [],
     }
-    for term in (terms or []):
+    for term in terms or []:
         if not isinstance(term, dict):
             continue
         label = term.get("label", "")
@@ -90,7 +87,7 @@ def enrich(input_path: str, output_path: str):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input",  default="uodo_decisions.jsonl")
+    parser.add_argument("--input", default="uodo_decisions.jsonl")
     parser.add_argument("--output", default="uodo_decisions_enriched.jsonl")
     args = parser.parse_args()
     enrich(args.input, args.output)

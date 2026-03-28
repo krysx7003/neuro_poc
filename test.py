@@ -8,9 +8,7 @@ while True:
     pts, next_off = client.scroll(
         collection_name="uodo_decisions",
         scroll_filter=Filter(
-            must=[
-                FieldCondition(key="doc_type", match=MatchValue(value="uodo_decision"))
-            ]
+            must=[FieldCondition(key="doc_type", match=MatchValue(value="uodo_decision"))]
         ),
         limit=500,
         offset=offset,
@@ -18,7 +16,8 @@ while True:
         with_vectors=False,
     )
     for p in pts:
-        sigs.add(p.payload.get("signature", ""))
+        if p.payload:
+            sigs.add(p.payload.get("signature", ""))
     if not next_off:
         break
     offset = next_off

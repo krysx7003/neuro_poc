@@ -1,6 +1,4 @@
-"""
-Konfiguracja aplikacji UODO RAG — stałe i zmienne środowiskowe.
-"""
+"""Konfiguracja aplikacji UODO RAG — stałe i zmienne środowiskowe."""
 
 import os
 import re

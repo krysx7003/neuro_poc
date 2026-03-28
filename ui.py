@@ -1,6 +1,4 @@
-"""
-Interfejs użytkownika — karty wyników, budowanie kontekstu LLM, CSS.
-"""
+"""Interfejs użytkownika — karty wyników, budowanie kontekstu LLM, CSS."""
 
 import re
 from typing import Any
@@ -133,9 +131,7 @@ def build_context(
     if f.get("term_legal_basis"):
         filter_lines.append(f"Podstawa prawna: {', '.join(f['term_legal_basis'])}")
     if f.get("term_corrective_measure"):
-        filter_lines.append(
-            f"Środek naprawczy: {', '.join(f['term_corrective_measure'])}"
-        )
+        filter_lines.append(f"Środek naprawczy: {', '.join(f['term_corrective_measure'])}")
     if f.get("term_sector"):
         filter_lines.append(f"Sektor: {', '.join(f['term_sector'])}")
     if f.get("keyword"):
@@ -149,27 +145,23 @@ def build_context(
 
     memory_note = ""
 
-    print("Generating memory context")
     if memory and thread_id:
-        print("Memory and thread_id exist")
         related = memory.find_related(query, thread_id)
         if related:
-            snippets = [
+            snippets = []
+            for e in related[:3]:
                 f"- Poprzednie pytanie: «{e.query}» → znalezione decyzje: "
-                + (", ".join(e.top_signatures[:3]) if e.top_signatures else "brak")
-                for e in related[:2]
-            ]
+                if e.search_result.full:
+                    for res in e.search_result.full[:3]:
+                        (", ".join(res.get("signature", "")))
+
+                else:
+                    "brak"
             memory_note = (
-                "KONTEKST Z POPRZEDNICH ANALIZ (tej sesji):\n"
-                + "\n".join(snippets)
-                + "\n"
+                "KONTEKST Z POPRZEDNICH ANALIZ (tej sesji):\n" + "\n".join(snippets) + "\n"
             )
 
-        print(f"Context {related}")
-
-    header = TPL_HEADER.render(
-        query=query, filter_note=filter_note, memory_note=memory_note
-    )
+    header = TPL_HEADER.render(query=query, filter_note=filter_note, memory_note=memory_note)
     parts = [header]
     chars = len(header)
 
@@ -198,13 +190,9 @@ def build_context(
         elif dtype in ("gdpr_article", "gdpr_recital"):
             art_num = doc.get("article_num", "?")
             prefix = "Motyw" if dtype == "gdpr_recital" else f"Art. {art_num}"
-            block = TPL_GDPR.render(
-                rank=i, prefix=prefix, text=doc.get("content_text", "")
-            )
+            block = TPL_GDPR.render(rank=i, prefix=prefix, text=doc.get("content_text", ""))
         else:
-            keywords = doc.get("keywords_text", "") or ", ".join(
-                doc.get("keywords", [])
-            )
+            keywords = doc.get("keywords_text", "") or ", ".join(doc.get("keywords", []))
             acts = doc.get("related_acts", [])[:4] + doc.get("related_eu_acts", [])[:2]
             block = TPL_DECISION.render(
                 rank=i,
@@ -242,7 +230,7 @@ def decision_url(doc: dict[str, Any]) -> str:
     return f"{UODO_PORTAL_BASE}/urn:ndoc:gov:pl:uodo:{year}:{slug}/content"
 
 
-def render_decision_card(doc: dict[str, Any], rank: int) -> None:
+def render_decision_card(doc: dict[str, Any]) -> None:
     sig = doc.get("signature", "?")
     status = doc.get("status", "")
     date = doc.get("date_published", "") or doc.get("date_issued", "")
@@ -256,8 +244,7 @@ def render_decision_card(doc: dict[str, Any], rank: int) -> None:
     if isinstance(kw_list, str):
         kw_list = [k.strip() for k in kw_list.split(",") if k.strip()]
     taxonomy_values = {
-        v.lower()
-        for v in doc.get("term_decision_type", []) + doc.get("term_sector", [])
+        v.lower() for v in doc.get("term_decision_type", []) + doc.get("term_sector", [])
     }
     kw_list = [k for k in kw_list if k.lower() not in taxonomy_values]
 
@@ -330,15 +317,13 @@ def render_decision_card(doc: dict[str, Any], rank: int) -> None:
     st.divider()
 
 
-def render_act_article_card(doc: dict[str, Any], rank: int) -> None:
+def render_act_article_card(doc: dict[str, Any]) -> None:
     art_num = doc.get("article_num", "?")
     chunk_idx = doc.get("chunk_index", 0)
     total = doc.get("chunk_total", 1)
     score = doc.get("_score", 0)
     text = doc.get("content_text", "")[:600]
-    label = f"Art. {art_num} u.o.d.o." + (
-        f" (część {chunk_idx + 1}/{total})" if total > 1 else ""
-    )
+    label = f"Art. {art_num} u.o.d.o." + (f" (część {chunk_idx + 1}/{total})" if total > 1 else "")
 
     st.markdown(
         f"""
@@ -359,7 +344,7 @@ def render_act_article_card(doc: dict[str, Any], rank: int) -> None:
     )
 
 
-def render_gdpr_card(doc: dict[str, Any], rank: int) -> None:
+def render_gdpr_card(doc: dict[str, Any]) -> None:
     art_num = doc.get("article_num", "?")
     chunk_idx = doc.get("chunk_index", 0)
     total = doc.get("chunk_total", 1)
@@ -396,12 +381,12 @@ def render_gdpr_card(doc: dict[str, Any], rank: int) -> None:
     )
 
 
-def render_card(doc: dict[str, Any], rank: int) -> None:
+def render_card(doc: dict[str, Any]) -> None:
     """Dispatcher — wybiera typ karty na podstawie doc_type."""
     dtype = doc.get("doc_type", "")
     if dtype == "legal_act_article":
-        render_act_article_card(doc, rank)
+        render_act_article_card(doc)
     elif dtype in ("gdpr_article", "gdpr_recital"):
-        render_gdpr_card(doc, rank)
+        render_gdpr_card(doc)
     else:
-        render_decision_card(doc, rank)
+        render_decision_card(doc)
