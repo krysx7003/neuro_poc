@@ -63,11 +63,20 @@ def parse_nsa_judgment(text: str, filename: str) -> Dict[str, Any]:
         "keywords": [],
     }
     
-    # 1. HEADER: "FPS 6/97 - Uchwała Składu Siedmiu Sędziów"
-    header_match = re.match(r"([A-Z/ ]+\d+/\d{2}) - (.+)", lines[0])
-    if header_match:
-        doc["signature"] = header_match.group(1).strip()
-        doc["title"] = header_match.group(2).strip()
+    # 1. FIRST LINE ONLY: "$Signature$ - Wyrok"
+    first_line = lines[0] if lines else ""
+    match = re.match(r"^(.+?)(?:\s+-\s+(.+))?$", first_line.strip())
+    if match:
+        doc["signature"] = match.group(1).strip()
+        doc["title"] = match.group(2).strip() if match.group(2) else "Wyrok"
+        print(f"  ✅ Found: '{doc['signature']}' - {doc['title']}")
+
+    # Fallback: filename if first line fails  
+    if not doc["signature"]:
+        sig_from_filename = re.search(r"([IVX]+ ?[A-ZŁ]{2,} ?\d+[-/]\d{2,4}[A-ZP]?)", filename)
+        if sig_from_filename:
+            doc["signature"] = sig_from_filename.group(1).strip()
+            print(f"  ✅ Fallback: '{doc['signature']}' ({filename})")
     
     # 2. METADATA TABLE (Data orzeczenia|1997-09-22|)
     table_start = next((i for i, line in enumerate(lines) if "Data orzeczenia" in line), None)
