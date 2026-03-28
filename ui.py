@@ -411,56 +411,75 @@ def render_gdpr_card(doc: dict[str, Any], rank: int) -> None:
     )
 
 def render_nsa_card(doc: dict[str, Any], rank: int) -> None:
-    """Render NSA judgment card matching other card styles."""
+    """NSA card matching UODO style exactly."""
     sig = doc.get("signature", "?")
     year = doc.get("year", "")
-    court = doc.get("court", "N/A")
-    judges = doc.get("judges", [])
+    doc_type = doc.get("doc_type", "").upper()  # WYROK/POSTANOWIENIE/UCHWAŁA
     title = doc.get("title", "")
-    date = doc.get("date_issued", "")
-    score = doc.get("_score", 0)
+    date = doc.get("date_issued", "") or doc.get("date", "")
+    court = doc.get("court", "Naczelny Sąd Administracyjny")
+    judges = doc.get("judges", [])
+    summary = doc.get("summary", doc.get("tezy", ""))
+    ruling = doc.get("ruling", doc.get("sentencja", ""))
+    keywords = doc.get("keywords", [])
+    related_acts = doc.get("related_acts", [])
     
-    # Format judges (short)
-    judges_str = ", ".join(judges[:2])
-    if len(judges) > 2:
+    # Format date like UODO
+    date_fmt = date[:10] if date else f"{year}"
+    
+    # Judges
+    judges_str = ", ".join(judges[:3])
+    if len(judges) > 3:
         judges_str += " ..."
     
-    # Simple NSA URL (local file reference)
-    nsa_url = f"file://{doc.get('source_file', '')}"
+    # Keywords/tags
+    kw_str = " · ".join(keywords[:6]) if keywords else "brak"
     
-    # Format date like UODO cards
-    date_fmt = date[:10] if date else ""
+    # Acts
+    acts_str = " · ".join(related_acts[:4]) if related_acts else "brak"
+    
+    # File link
+    source_file = doc.get("source_file", "")
+    nsa_url = f"file://{source_file}" if source_file else "#"
     
     st.markdown(f"""
     <article class="doc-list-item">
       <header>
         <a href="{nsa_url}" target="_blank">{sig}</a>
-        <time><small>NSA {year}</small></time>
+        <time><small>NSA {date_fmt}</small></time>
       </header>
       <main>
         <h2 class="d-flex justify-content-between align-items-start gap-2">
-          <span>{title[:280]}{"…" if len(title) > 280 else ""}</span>
+          <span>{court} - {doc_type}</span>
           <span class="status-badge status-final">NSA</span>
         </h2>
-        <div>
-          <small class="text-muted">
-            Sąd: {court} | Sędziowie: {judges_str}
-          </small>
-        </div>
-        <p class="text-muted">
-          Tezy: {doc.get("summary", "")[:250]}{"…" if len(doc.get("summary", "")) > 250 else ""}
-        </p>
+        <p class="text-muted">{title[:280]}{"…" if len(title) > 280 else ""}</p>
       </main>
-      <footer><small class="text-muted">score: {score:.3f}</small></footer>
+      
+      <div class="mt-2">
+        <details>
+          <summary>📝 Teza: <strong>{len(summary)} znaków</strong></summary>
+          <p>{summary[:400]}{"…" if len(summary) > 400 else ""}</p>
+        </details>
+        <details>
+          <summary>⚖️ Sentencja: <strong>{len(ruling)} znaków</strong></summary>
+          <p>{ruling[:400]}{"…" if len(ruling) > 400 else ""}</p>
+        </details>
+      </div>
+      
+      <div class="mt-2">
+        <small class="text-muted">
+          <strong>Sędziowie:</strong> {judges_str}<br>
+          <strong>Hasła:</strong> {kw_str}<br>
+          <strong>Przepisy:</strong> {acts_str}
+        </small>
+      </div>
+      
+      <footer><small class="text-muted">score: {doc.get("_score", 0):.3f}</small></footer>
     </article>""", 
     unsafe_allow_html=True
     )
     
-    # Related acts (same as other cards)
-    with st.container():
-        all_acts = doc.get("related_acts", [])
-        if all_acts:
-            st.caption("📜 Powołane akty: " + " · ".join(f"`{a}`" for a in all_acts[:4]))
     st.divider()
 
 def render_card(doc: dict[str, Any], rank: int) -> None:

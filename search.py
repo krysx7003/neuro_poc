@@ -570,7 +570,7 @@ def hybrid_search(
                 doc["_graph_relation"] = rel_type
                 decisions.append(doc)
                 seen_graph.add(sig)
-        merged = decisions + act_docs + gdpr_docs
+        merged = decisions + act_docs + gdpr_docs + nsa_docs
 
     return merged, matched_tags
 
