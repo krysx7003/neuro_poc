@@ -4,6 +4,9 @@ import os
 import re
 from pathlib import Path
 
+import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
+
 # Wczytaj .env z katalogu tego pliku (niezależnie od CWD przy uruchamianiu)
 try:
     from dotenv import load_dotenv
@@ -13,21 +16,35 @@ try:
 except ImportError:
     pass
 
+
+def get_secret(key: str, default: str) -> str:
+    value = os.getenv(key)
+    if value is not None:
+        return value
+
+    try:
+        return st.secrets[key]
+    except (KeyError, StreamlitSecretNotFoundError):
+        pass
+
+    return default
+
+
 # ── Qdrant ────────────────────────────────────────────────────────
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
+QDRANT_URL = get_secret("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = get_secret("QDRANT_API_KEY", "")
 COLLECTION_NAME = "uodo_decisions"
-GRAPH_PATH = os.getenv("UODO_GRAPH_PATH", "./uodo_graph.pkl")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "sdadas/mmlw-retrieval-roberta-large")
+GRAPH_PATH = get_secret("UODO_GRAPH_PATH", "./uodo_graph.pkl")
+EMBED_MODEL = get_secret("EMBED_MODEL", "sdadas/mmlw-retrieval-roberta-large")
 
 # ── LLM providerzy ───────────────────────────────────────────────
 # Ollama działa zawsze przez lokalny daemon (localhost).
 # Modele cloud (np. "gpt-oss:120b-cloud") wymagają OLLAMA_CLOUD_API_KEY —
 # daemon przekazuje go przy pobieraniu i uruchamianiu modelu z chmury.
 # Modele czysto lokalne (np. "gemma3") działają bez klucza.
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-OLLAMA_CLOUD_API_KEY = os.getenv("OLLAMA_CLOUD_API_KEY", "")
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+GROQ_API_KEY = get_secret("GROQ_API_KEY", "")
+OLLAMA_CLOUD_API_KEY = get_secret("OLLAMA_CLOUD_API_KEY", "")
+OLLAMA_URL = get_secret("OLLAMA_URL", "http://localhost:11434")
 
 PROVIDERS = ["Ollama", "Groq"]
 DEFAULT_PROVIDER = "Ollama"
