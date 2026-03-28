@@ -1,79 +1,77 @@
 #!/usr/bin/env python3
 """
-format_orzeczenia.py + UODO API - FIXED VERSION
-Converts local search.json → unified JSONL EXACTLY like uodo_scraper.py
-NUMBERS → KEYWORDS RESOLVED via meta.json/terms[]
+Batch converter: Processes ALL subfolders containing UODO 4-files (index.json, toc.json, search.json, 000_pl.xml)
+and outputs uodo_scraper.py-compatible JSONL files.
 """
 
 import json
 import re
+import xml.etree.ElementTree as ET
 import os
-import time
-from pathlib import Path
-from typing import Dict, List, Optional
-import requests
-from requests.auth import HTTPBasicAuth
 import argparse
+from pathlib import Path
+from typing import Dict, List
+from datetime import datetime
 
-# --- CONFIGURATION ---
-ROOT_DIRECTORY = "C:/Users/wrobl/Desktop/LEXSEARCH/NEUROPOC/daneUODO/orzeczenia"
-OUTPUT_FILE = "uodo_orzeczenia.jsonl"
+# ─────────────────────────── CONFIG ──────────────────────────────
 
-API_BASE = "https://orzeczenia.uodo.gov.pl/api"
-DEFAULT_DELAY = 0.3
-MAX_RETRIES = 3
-TIMEOUT = 30
+# Same constants as previous script (RELATION_TO_GRAPH, _PUB_STATUS_MAP, _MONTHS)
+RELATION_TO_GRAPH = {
+    "quotes": "QUOTES", "quoted": "QUOTED_BY", "refers": "REFERS", "referred": "REFERRED_BY",
+    "implements": "IMPLEMENTS", "implemented": "IMPLEMENTED_BY", "amends": "AMENDS", 
+    "amended": "AMENDED_BY", "executes": "EXECUTES", "introduces": "INTRODUCES",
+    "replaces": "REPLACES", "replaced": "REPLACED_BY",
+}
 
-# --- HTTP HELPERS (EXACT from scraper) ---
-def make_session(user: str = None, password: str = None) -> requests.Session:
-    s = requests.Session()
-    if user and password:
-        s.auth = HTTPBasicAuth(user, password)
-    s.headers["Accept"] = "application/json"
-    return s
+_PUB_STATUS_MAP = {
+    "final": "prawomocna", "nonfinal": "nieprawomocna",
+    "published": "prawomocna", "archived": "prawomocna",
+}
 
-def get(session: requests.Session, url: str, retries: int = MAX_RETRIES, accept: str = None) -> Optional[requests.Response]:
-    headers = {"Accept": accept} if accept else {}
-    for attempt in range(retries):
-        try:
-            r = session.get(url, timeout=TIMEOUT, headers=headers)
-            if r.status_code == 200: return r
-            if r.status_code == 404: return None
-            if r.status_code == 401: 
-                print(f"❌ HTTP 401 — wymagana autoryzacja (--user / --password)")
-                return None
-            print(f"⚠️ HTTP {r.status_code} dla {url} (próba {attempt+1})")
-        except Exception as e:
-            print(f"⚠️ Błąd połączenia: {e} (próba {attempt+1})")
-        if attempt < retries - 1: time.sleep(2)
-    return None
+# ─────────────────────────── PARSING FUNCTIONS (unchanged) ──────────────────────────────
 
-# --- PARSERS (EXACT from scraper) ---
 def multilang_str(field) -> str:
-    if isinstance(field, dict): return field.get("pl") or field.get("en") or ""
+    if isinstance(field, dict):
+        return field.get("pl") or field.get("en") or ""
     return str(field) if field else ""
 
-def parse_meta(data: Dict) -> Dict:
+def refid_to_signature(refid: str) -> str:
+    m = re.search(r"uodo:(\d{4}):([\w_]+)$", refid)
+    if not m:
+        return refid
+    year = m.group(1)
+    code = m.group(2).upper().replace("_", ".")
+    parts = [p for p in code.split(".") if p != year]
+    if len(parts) >= 3:
+        return f"{parts[0]}.{parts[1]}.{parts[2]}.{year}"
+    return f"{code}.{year}"
+
+def parse_index_json(index_data: Dict) -> Dict:
     result = {
-        "name": "", "title_full": "", "keywords": "", "keywords_list": [],
-        "entities": [], "kind": "", "legal_status": "", "pub_workflow_status": "",
-        "date_issued": "", "date_published": "", "refs": {},
+        "name": multilang_str(index_data.get("name", {})),
+        "title_full": multilang_str(index_data.get("title", {})),
+        "kind": index_data.get("kind", ""),
+        "pub_workflow_status": index_data.get("publication", {}).get("status", ""),
+        "entities": [], "keywords_list": [], "keywords": "", "refs": [],
         "term_decision_type": [], "term_violation_type": [], "term_legal_basis": [],
-        "term_corrective_measure": [], "term_sector": []
+        "term_corrective_measure": [], "term_sector": [],
+        "dates": index_data.get("dates", []),
     }
-    if not data: return result
     
-    result["name"] = multilang_str(data.get("name", {}))
-    result["title_full"] = multilang_str(data.get("title", {}))
-    result["legal_status"] = data.get("status", "")
+    for ent in index_data.get("entities", []):
+        result["entities"].append({
+            "title": multilang_str(ent.get("title", {})),
+            "name": multilang_str(ent.get("name", {})),
+            "function": ent.get("function", "other"),
+        })
     
-    # Parse terms → keywords + taxonomy (THIS RESOLVES NUMBERS!)
     kw_names = []
-    for term in (data.get("terms", []) or []):
-        if not isinstance(term, dict): continue
+    for term in index_data.get("terms", []):
         name = multilang_str(term.get("name", {}))
         label = term.get("label", "")
-        if name: kw_names.append(name)
+        if name:
+            kw_names.append(name)
+        
         if label:
             prefix = label.split(".")[0]
             if prefix == "1": result["term_decision_type"].append(name)
@@ -84,284 +82,224 @@ def parse_meta(data: Dict) -> Dict:
     
     result["keywords_list"] = kw_names
     result["keywords"] = ", ".join(kw_names)
-    
-    # Entities
-    for ent in (data.get("entities", []) or []):
-        if isinstance(ent, dict):
-            result["entities"].append({
-                "title": multilang_str(ent.get("title", {})),
-                "name": multilang_str(ent.get("name", {})),
-                "function": ent.get("function", "other")
-            })
-    
-    result["kind"] = data.get("kind", "")
-    pub = data.get("publication", {})
-    result["pub_workflow_status"] = pub.get("status", "") if isinstance(pub, dict) else ""
-    
-    # Parse dates from meta (calls parse_dates)
-    dates_parsed = parse_dates(data.get("dates", []))
-    result["date_issued"] = dates_parsed["date_issued"]
-    result["date_published"] = dates_parsed["date_published"]
+    result["refs"] = index_data.get("refs", [])
     
     return result
 
-def parse_dates(data) -> Dict[str, str]:
+def parse_search_json(search_data: Dict) -> Dict:
+    dates = search_data.get("dates", {})
+    return {
+        "date_announcement": dates.get("announcement", ""),
+        "date_publication": dates.get("publication", ""),
+    }
+
+def parse_xml_content(xml_path: Path) -> str:
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+        content = []
+        for elem in root.iter():
+            if elem.text: content.append(elem.text.strip())
+            if elem.tail: content.append(elem.tail.strip())
+        return "\n".join(line for line in content if line)
+    except Exception:
+        with open(xml_path, 'r', encoding='utf-8') as f:
+            return f.read()
+
+def parse_dates(dates_data: List[Dict]) -> Dict[str, str]:
     result = {"date_issued": "", "date_published": "", "date_effect": ""}
-    if not data: return result
-    
-    items = data if isinstance(data, list) else data.get("dates", [])
-    for d in (items if isinstance(items, list) else []):
-        if not isinstance(d, dict): continue
+    for d in dates_data:
         use = d.get("use", "")
         val = d.get("date", "")
         if not val: continue
-        if use == "announcement" and not result["date_issued"]: result["date_issued"] = val
-        elif use == "publication" and not result["date_published"]: result["date_published"] = val
-        elif use == "effect" and not result["date_effect"]: result["date_effect"] = val
+        if use == "announcement" and not result["date_issued"]:
+            result["date_issued"] = val
+        elif use == "publication" and not result["date_published"]:
+            result["date_published"] = val
+        elif use == "effect" and not result["date_effect"]:
+            result["date_effect"] = val
     return result
 
-def refid_to_signature(refid: str) -> str:
-    m = re.search(r"uodo:(\d{4}):([\w_]+)$", refid)
-    if not m: return refid
-    year = m.group(1)
-    code = m.group(2).upper().replace("_", ".")
-    parts = [p for p in code.split(".") if p != year]
-    if len(parts) >= 3: return f"{parts[0]}.{parts[1]}.{parts[2]}.{year}"
-    return f"{code}.{year}"
+def parse_refs(refs_data: List[Dict]) -> Dict:
+    result = {"acts": [], "eu_acts": [], "court_rulings": [], "uodo_rulings": [], "edpb": [], "refs_full": []}
+    
+    for ref in refs_data:
+        refid = ref.get("refid", "")
+        relation = ref.get("relation", "refers")
+        ref_type = ref.get("type", "direct")
+        name = ref.get("name", "") or ""
+        graph_rel = RELATION_TO_GRAPH.get(relation, "REFERS")
+        entry = {"refid": refid, "relation": relation, "ref_type": ref_type, 
+                "graph_relation": graph_rel, "name": name}
+        
+        if "urn:ndoc:pro:pl:durp:" in refid:
+            m = re.search(r"durp:(\d{4}):(\d+)", refid)
+            if m:
+                sig = f"Dz.U. {m.group(1)} poz. {m.group(2)}"
+                entry.update({"signature": sig, "category": "act"})
+                if sig not in result["acts"]: result["acts"].append(sig)
+                result["refs_full"].append(entry)
+        elif "urn:ndoc:pro:eu:ojol:" in refid:
+            m = re.search(r"ojol:(\d{4}):(\d+)", refid)
+            if m:
+                sig = f"EU {m.group(1)}/{m.group(2)}"
+                entry.update({"signature": sig, "category": "eu_act"})
+                if sig not in result["eu_acts"]: result["eu_acts"].append(sig)
+                result["refs_full"].append(entry)
+        elif "urn:ndoc:court:" in refid:
+            sig = name or refid.split(":")[-1].replace("_", " ").upper()
+            entry.update({"signature": sig, "category": "court_ruling"})
+            if sig not in result["court_rulings"]: result["court_rulings"].append(sig)
+            result["refs_full"].append(entry)
+        elif "urn:ndoc:gov:pl:uodo:" in refid:
+            sig = name or refid_to_signature(refid)
+            entry.update({"signature": sig, "category": "uodo_ruling"})
+            if sig not in result["uodo_rulings"]: result["uodo_rulings"].append(sig)
+            result["refs_full"].append(entry)
+        elif "urn:ndoc:gov:eu:edpb:" in refid:
+            sig = name or refid.split(":")[-1]
+            entry.update({"signature": sig, "category": "edpb"})
+            if sig not in result["edpb"]: result["edpb"].append(sig)
+            result["refs_full"].append(entry)
+        else:
+            entry.update({"signature": name or refid, "category": "other"})
+            result["refs_full"].append(entry)
+    
+    return result
 
 def extract_legal_status(keywords: str, pub_status: str) -> str:
-    _PUB_STATUS_MAP = {"final": "prawomocna", "nonfinal": "nieprawomocna", "published": "prawomocna", "archived": "prawomocna"}
-    if pub_status in _PUB_STATUS_MAP: return _PUB_STATUS_MAP[pub_status]
-    if "prawomocna" in keywords.lower(): return "prawomocna"
-    return "nieprawomocna"
+    if pub_status in _PUB_STATUS_MAP:
+        return _PUB_STATUS_MAP[pub_status]
+    return "prawomocna" if "prawomocna" in keywords.lower() else "nieprawomocna"
 
-# --- EXACT fetch_decision FROM SCRAPER (KEYWORD RESOLUTION!) ---
-def fetch_decision(session: requests.Session, doc_id: str, doc_fields: Dict, delay: float = DEFAULT_DELAY) -> Dict:
-    refid = doc_fields.get("refid", "")
-    if not refid: return {"_error": "brak_refid", "doc_id": doc_id}
+# ─────────────────────────── SINGLE DECISION PROCESSOR ──────────────────────────────
+
+def process_single_decision(folder_path: Path, output_file: Path) -> Dict:
+    """Process one folder → one JSONL line (returns doc for stats)."""
+    index_path = folder_path / "index.json"
+    toc_path = folder_path / "toc.json"
+    search_path = folder_path / "search.json"
+    xml_path = folder_path / "000_pl.xml"
     
-    sig = refid_to_signature(refid)
+    # Validate files exist
+    required_files = [index_path, toc_path, search_path, xml_path]
+    if not all(f.exists() for f in required_files):
+        raise FileNotFoundError(f"Missing files in {folder_path}: {[f.name for f in required_files if not f.exists()]}")
+    
+    # Load data
+    with open(index_path, 'r', encoding='utf-8') as f: index_data = json.load(f)
+    with open(search_path, 'r', encoding='utf-8') as f: search_data = json.load(f)
+    with open(toc_path, 'r', encoding='utf-8') as f: toc_data = json.load(f)
+    
+    # Build doc (EXACT scraper format)
+    doc_id = index_data.get("id", "")
+    refid = index_data.get("refid", "")
+    signature = refid_to_signature(refid)
+    
     doc = {
-        "doc_id": doc_id, "refid": refid, "signature": sig,
+        "doc_id": doc_id, "refid": refid, "signature": signature,
         "url": f"https://orzeczenia.uodo.gov.pl/document/{refid}/content",
-        "source_collection": "UODO", "title": "", "title_full": "",
-        "keywords": "", "keywords_list": [], "status": "", "pub_workflow_status": "",
-        "kind": "", "date_issued": "", "date_published": "", "date_effect": "",
-        "year": 0, "entities": [], "content_text": "", "meta": {},
+        "source_collection": "UODO", "title": "", "title_full": "", "keywords": "",
+        "keywords_list": [], "status": "", "pub_workflow_status": "", "kind": "",
+        "date_issued": "", "date_published": "", "date_effect": "", "year": 0,
+        "entities": [], "content_text": parse_xml_content(xml_path),
+        "meta": index_data, "toc": toc_data,
         "refs_from_content": {"acts": [], "eu_acts": [], "court_rulings": [], "uodo_rulings": []},
         "refs_full": [], "related_legislation": [], "related_rulings": [],
         "term_decision_type": [], "term_violation_type": [], "term_legal_basis": [],
-        "term_corrective_measure": [], "term_sector": []
+        "term_corrective_measure": [], "term_sector": [],
     }
     
-    # 1. Year from signature
-    year_m = re.search(r"\b(20\d{2})\b", sig)
-    doc["year"] = int(year_m.group(1)) if year_m else 0
+    # Apply all parsing
+    parsed_meta = parse_index_json(index_data)
+    doc.update({
+        "title": parsed_meta["name"], "title_full": parsed_meta["title_full"],
+        "keywords": parsed_meta["keywords"], "keywords_list": parsed_meta["keywords_list"],
+        "entities": parsed_meta["entities"], "kind": parsed_meta["kind"],
+        "pub_workflow_status": parsed_meta["pub_workflow_status"],
+        "term_decision_type": parsed_meta["term_decision_type"],
+        "term_violation_type": parsed_meta["term_violation_type"],
+        "term_legal_basis": parsed_meta["term_legal_basis"],
+        "term_corrective_measure": parsed_meta["term_corrective_measure"],
+        "term_sector": parsed_meta["term_sector"],
+    })
     
-    # 2. Initial data from local search.json (like scraper index)
-    kw_raw = doc_fields.get("keywords", "")
-    doc["keywords"] = ", ".join(kw_raw) if isinstance(kw_raw, list) else str(kw_raw or "")
-    doc["title"] = doc_fields.get("title_pl", "")
+    dates_parsed = parse_dates(index_data.get("dates", []))
+    doc.update(dates_parsed)
+    if doc["date_issued"]: doc["year"] = int(doc["date_issued"][:4])
     
-    # 3. CONTENT body.txt (EXACT scraper sequence)
-    r = get(session, f"{API_BASE}/documents/public/items/{refid}:0/body.txt", accept="text/plain")
-    time.sleep(delay)
-    if r:
-        doc["content_text"] = r.text
-        print(f"  ✅ body: {len(doc['content_text'])} chars")
-    else:
-        r = get(session, f"{API_BASE}/documents/public/items/{refid}/body.txt", accept="text/plain")
-        time.sleep(delay)
-        if r: 
-            doc["content_text"] = r.text
-            print(f"  ✅ body (fallback): {len(doc['content_text'])} chars")
+    doc["status"] = extract_legal_status(doc["keywords"], doc["pub_workflow_status"])
     
-    # 4. META.JSON - THIS RESOLVES NUMBERS → KEYWORDS!
-    r = get(session, f"{API_BASE}/documents/public/items/{refid}/meta.json")
-    time.sleep(delay)
-    if r:
-        meta_raw = r.json()
-        doc["meta"] = meta_raw
-        parsed = parse_meta(meta_raw)
+    if parsed_meta["refs"]:
+        refs_parsed = parse_refs(parsed_meta["refs"])
+        doc["refs_from_content"].update({
+            k: v for k, v in refs_parsed.items() 
+            if k in ["acts", "eu_acts", "court_rulings", "uodo_rulings"]
+        })
+        doc["refs_full"] = refs_parsed["refs_full"]
         
-        # EXACT scraper title logic
-        if not doc["title"] and parsed["name"]: doc["title"] = parsed["name"]
-        doc["title_full"] = parsed["title_full"] or doc["title"]
+        def _find_relation(refs_full, sig): 
+            return next((r.get("relation", "refers") for r in refs_full if r.get("signature") == sig), "refers")
         
-        # 🔑 KEYWORD RESOLUTION HAPPENS HERE!
-        if parsed["keywords"]:  # meta.json gives Polish names!
-            doc["keywords"] = parsed["keywords"]
-            doc["keywords_list"] = parsed["keywords_list"]
-            print(f"  ✅ meta: {len(doc['keywords_list'])} keywords resolved!")
-        else:  # Fallback to local numeric keywords
-            doc["keywords_list"] = [k.strip() for k in doc["keywords"].split(",") if k.strip()]
-        
-        # Copy all parsed fields (EXACT scraper)
-        doc["entities"] = parsed["entities"]
-        doc["kind"] = parsed["kind"]
-        doc["pub_workflow_status"] = parsed["pub_workflow_status"]
-        if parsed["date_issued"]: doc["date_issued"] = parsed["date_issued"]
-        if parsed["date_published"]: doc["date_published"] = parsed["date_published"]
-        
-        # Status (EXACT scraper)
-        if parsed["legal_status"]:
-            doc["status"] = parsed["legal_status"]
-        else:
-            doc["status"] = extract_legal_status(doc["keywords"], doc["pub_workflow_status"])
-        
-        # Taxonomy
-        for key in ["term_decision_type", "term_violation_type", "term_legal_basis", 
-                   "term_corrective_measure", "term_sector"]:
-            doc[key] = parsed[key]
+        doc["related_legislation"] = [
+            {"type": "act", "signature": s, "relation": _find_relation(refs_parsed["refs_full"], s)} 
+            for s in refs_parsed["acts"]
+        ] + [
+            {"type": "eu_act", "signature": s, "relation": _find_relation(refs_parsed["refs_full"], s)} 
+            for s in refs_parsed["eu_acts"]
+        ]
+        doc["related_rulings"] = [
+            {"type": "uodo_ruling", "signature": s, "relation": _find_relation(refs_parsed["refs_full"], s)} 
+            for s in refs_parsed["uodo_rulings"]
+        ] + [
+            {"type": "court_ruling", "signature": s, "relation": _find_relation(refs_parsed["refs_full"], s)} 
+            for s in refs_parsed["court_rulings"]
+        ]
     
-    # 5. DATES.JSON
-    r = get(session, f"{API_BASE}/documents/public/items/{refid}/dates.json")
-    time.sleep(delay)
-    if r:
-        dates = parse_dates(r.json())
-        doc["date_issued"] = dates["date_issued"] or doc["date_issued"]
-        doc["date_published"] = dates["date_published"] or doc["date_published"]
-        doc["date_effect"] = dates["date_effect"]
-        if doc["date_issued"]: doc["year"] = int(doc["date_issued"][:4])
+    # Append to output
+    with open(output_file, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(doc, ensure_ascii=False) + "\n")
     
     return doc
 
-def extract_refs_from_text(content: str, own_sig: str) -> Dict:
-    result = {"acts": [], "eu_acts": [], "uodo_rulings": [], "court_rulings": [], "refs_full": []}
-    if not content: return result
-    
-    # Dz.U.
-    for m in re.finditer(r"Dz\.U\.\s*(?:z\s*r\.\s*)?(\d{4})\s*(?:poz\.)?\s*(\d+)", content):
-        sig = f"Dz.U. {m.group(1)} poz. {m.group(2)}"
-        if sig not in result["acts"]:
-            result["acts"].append(sig)
-            result["refs_full"].append({
-                "signature": sig, "category": "act", "relation": "quotes", 
-                "graph_relation": "QUOTES", "ref_type": "direct"
-            })
-    
-    # RODO
-    if re.search(r"2016/679|RODO|GDPR", content):
-        sig = "EU 2016/679"
-        if sig not in result["eu_acts"]:
-            result["eu_acts"].append(sig)
-            result["refs_full"].append({
-                "signature": sig, "category": "eu_act", "relation": "implements",
-                "graph_relation": "IMPLEMENTS", "ref_type": "direct", "name": "RODO"
-            })
-    
-    # Other UODO decisions
-    for m in re.finditer(r"(DKN|ZSPU|ZSZS|ZKE)\.[\d\.]+\d{4}", content):
-        sig = m.group(0)
-        if sig != own_sig and sig not in result["uodo_rulings"]:
-            result["uodo_rulings"].append(sig)
-            result["refs_full"].append({
-                "signature": sig, "category": "uodo_ruling", "relation": "refers",
-                "graph_relation": "REFERS", "ref_type": "direct"
-            })
-    
-    return result
+# ─────────────────────────── BATCH PROCESSOR ──────────────────────────────
 
-# --- MAIN TRANSFORM (uses scraper logic) ---
-def transform_json(input_data: Dict, session: requests.Session) -> Optional[Dict]:
-    content = input_data.get("fts", {}).get("content", {}).get("pl", "")
-    if not content: return None
+def batch_process(root_dir: Path, output_file: Path):
+    """Scan root_dir/*/, process each valid subfolder."""
+    root_dir = root_dir.resolve()
     
-    sig_match = re.search(r'^([A-ZŚŻŹĆĄĘŁŃÓ]+(?:\.[\d]+)+)', content)
-    if not sig_match: return None
+    # Clear output if exists
+    if output_file.exists():
+        output_file.unlink()
     
-    signature = sig_match.group(1)
-    refid = input_data.get("refid", f"urn:ndoc:gov:pl:uodo:{signature.split('.')[-1]}:{signature.lower().replace('.', '_')}")
+    processed = 0
+    errors = 0
     
-    # Prepare doc_fields like scraper index response
-    doc_fields = {
-        "id": input_data.get("id", f"local_{signature}"),
-        "refid": refid,
-        "keywords": input_data.get("keywords", []),
-        "title_pl": content.split('\n')[0].strip()[:200]
-    }
+    print(f"🔍 Scanning {root_dir} for subfolders with 4 UODO files...")
     
-    print(f"🔍 Processing {signature}...")
-    doc = fetch_decision(session, doc_fields["id"], doc_fields)
-    
-    if doc.get("_error"):
-        print(f"  ❌ {doc['_error']}")
-        return None
-    
-    # Fallback: use local content if API failed
-    if not doc["content_text"]:
-        doc["content_text"] = content[:50000]
-    
-    # Add doctype for your system
-    doc["doctype"] = "uododecision"
-    
-    # Add refs fallback
-    if not doc["refs_full"]:
-        refs = extract_refs_from_text(doc["content_text"], signature)
-        doc["refs_from_content"] = {
-            "acts": refs["acts"], "eu_acts": refs["eu_acts"],
-            "uodo_rulings": refs["uodo_rulings"], "court_rulings": refs["court_rulings"]
-        }
-        doc["refs_full"] = refs["refs_full"]
-    
-    print(f"  ✅ {len(doc['keywords_list'])} keywords: {doc['keywords_list'][:3]}...")
-    return doc
-
-# --- MAIN ---
-def main(user: str = None, password: str = None, delay: float = 0.3, limit: int = None):
-    session = make_session(user, password)
-    path_root = Path(ROOT_DIRECTORY)
-    
-    count_files, count_docs, skipped_sig, api_errors = 0, 0, 0, 0
-    
-    print(f"🔍 Searching for 'search.json' in {path_root.absolute()}...")
-    print(f"🌐 UODO API enabled (delay={delay}s)")
-    
-    global DEFAULT_DELAY
-    DEFAULT_DELAY = delay
-    
-    with open(OUTPUT_FILE, 'w', encoding='utf-8') as outfile:
-        for file_path in path_root.rglob('search.json'):
-            count_files += 1
-            print(f"\n📄 Processing: {file_path}")
+    for subfolder in root_dir.iterdir():
+        if not subfolder.is_dir():
+            continue
             
-            try:
-                with open(file_path, 'r', encoding='utf-8') as infile:
-                    data = json.load(infile)
-                
-                items = data if isinstance(data, list) else [data]
-                
-                for i, item in enumerate(items[:limit] if limit else items):
-                    standardized = transform_json(item, session)
-                    if standardized is None:
-                        skipped_sig += 1
-                        print(f"  ⚠️ Skipped: No valid signature")
-                    else:
-                        outfile.write(json.dumps(standardized, ensure_ascii=False) + "\n")
-                        count_docs += 1
-                        print(f"  ✅ Saved: {standardized['signature']} ({len(standardized['keywords_list'])} keywords)")
-                        
-                        if limit and i >= limit-1: break
-                        
-            except Exception as e:
-                print(f"❌ Error: {e}")
-                api_errors += 1
+        try:
+            doc = process_single_decision(subfolder, output_file)
+            processed += 1
+            sig = doc["signature"]
+            print(f"✅ {sig:25} ({len(doc['content_text']):6,} chars, {len(doc['refs_full'])} refs)")
+            
+        except Exception as e:
+            errors += 1
+            print(f"❌ {subfolder.name:25} ERROR: {e}")
     
-    print("\n" + "="*60)
-    print(f"✅ FINISHED!")
-    print(f"📁 Files found: {count_files}")
-    print(f"📝 Valid docs: {count_docs}")
-    print(f"⚠️  Skipped sigs: {skipped_sig}")
-    print(f"❌ API errors: {api_errors}")
-    print(f"💾 Output: {OUTPUT_FILE}")
-    print("="*60)
+    print(f"\n📊 SUMMARY: {processed} processed, {errors} errors → {output_file}")
+    print(f"   Ready for uodo_scraper.py pipeline!")
+
+# ─────────────────────────── CLI ──────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="format_orzeczenia.py + UODO API (exact scraper replica)")
-    parser.add_argument("--user", default=None, help="UODO API login")
-    parser.add_argument("--password", default=None, help="UODO API password") 
-    parser.add_argument("--delay", type=float, default=0.3, help="API delay (s)")
-    parser.add_argument("--limit", type=int, default=None, help="Limit docs per file for testing")
+    parser = argparse.ArgumentParser(description="Batch convert UODO subfolders to JSONL")
+    parser.add_argument("root_dir", help="Folder containing subfolders with 4 files each")
+    parser.add_argument("-o", "--output", default="uodo_orzeczenia.jsonl", help="Output JSONL file")
     args = parser.parse_args()
     
-    main(args.user, args.password, args.delay, args.limit)
+    batch_process(Path(args.root_dir), Path(args.output))
