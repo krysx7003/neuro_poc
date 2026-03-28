@@ -481,45 +481,45 @@ def _render_history(
 
 
 def render_documents(res: SearchResult):
-    _ = st.markdown(f"### 📋 Dokumenty ({len(res.full)})")
-    tabs = st.tabs(
-        [
-            f"Wszystkie ({len(res.full)})",
-            f"Decyzje UODO ({len(res.decisions)})",
-            f"Ustawa u.o.d.o. ({len(res.act_arts)})",
-            f"RODO ({len(res.gdpr_docs)})",
-            f"Graf ({len(res.graph_docs)})",
-        ]
-    )
+    with st.expander(f"📋 Dokumenty ({len(res.full)})", expanded=False):
+        tabs = st.tabs(
+            [
+                f"Wszystkie ({len(res.full)})",
+                f"Decyzje UODO ({len(res.decisions)})",
+                f"Ustawa u.o.d.o. ({len(res.act_arts)})",
+                f"RODO ({len(res.gdpr_docs)})",
+                f"Graf ({len(res.graph_docs)})",
+            ]
+        )
 
-    with tabs[0]:
-        for i, doc in enumerate(res.full, 1):
-            render_card(doc)
-    with tabs[1]:
-        if res.decisions:
-            for doc in res.decisions:
-                render_decision_card(doc)
-        else:
-            _ = st.info("Brak decyzji UODO dla tego zapytania.")
-    with tabs[2]:
-        if res.act_arts:
-            for doc in res.act_arts:
-                render_act_article_card(doc)
-        else:
-            _ = st.info("Brak artykułów ustawy dla tego zapytania.")
-    with tabs[3]:
-        if res.gdpr_docs:
-            for doc in res.gdpr_docs:
-                render_gdpr_card(doc)
-        else:
-            _ = st.info("Brak artykułów RODO dla tego zapytania.")
-    with tabs[4]:
-        if res.graph_docs:
-            _ = st.info("Decyzje powiązane przez cytowania z wynikami semantic search.")
-            for doc in res.graph_docs:
-                render_decision_card(doc)
-        else:
-            _ = st.info("Brak wyników z grafu powiązań.")
+        with tabs[0]:
+            for i, doc in enumerate(res.full, 1):
+                render_card(doc)
+        with tabs[1]:
+            if res.decisions:
+                for doc in res.decisions:
+                    render_decision_card(doc)
+            else:
+                _ = st.info("Brak decyzji UODO dla tego zapytania.")
+        with tabs[2]:
+            if res.act_arts:
+                for doc in res.act_arts:
+                    render_act_article_card(doc)
+            else:
+                _ = st.info("Brak artykułów ustawy dla tego zapytania.")
+        with tabs[3]:
+            if res.gdpr_docs:
+                for doc in res.gdpr_docs:
+                    render_gdpr_card(doc)
+            else:
+                _ = st.info("Brak artykułów RODO dla tego zapytania.")
+        with tabs[4]:
+            if res.graph_docs:
+                _ = st.info("Decyzje powiązane przez cytowania z wynikami semantic search.")
+                for doc in res.graph_docs:
+                    render_decision_card(doc)
+            else:
+                _ = st.info("Brak wyników z grafu powiązań.")
 
 
 def _render_answer(
@@ -594,8 +594,7 @@ def _render_answer(
                     st.session_state["thread_id"] = id
 
                 render_documents(res)
-
-                st.rerun()
+                # st.rerun()
 
             except Exception as e:
                 _ = st.error(f"Błąd LLM: {e}")
