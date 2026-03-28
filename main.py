@@ -37,6 +37,10 @@ from ui import (
     PAGE_HEADER_HTML,
     UODO_CSS,
     build_context,
+    render_act_article_card,
+    render_card,
+    render_decision_card,
+    render_gdpr_card,
 )
 
 
@@ -339,48 +343,6 @@ def main() -> None:
             effective_query,
         )
 
-        # _ = st.markdown(f"### 📋 Dokumenty ({len(docs)})")
-        # tabs = st.tabs(
-        #     [
-        #         f"Wszystkie ({len(docs)})",
-        #         f"Decyzje UODO ({len(decisions)})",
-        #         f"Ustawa u.o.d.o. ({len(act_arts)})",
-        #         f"RODO ({len(gdpr_docs)})",
-        #         f"Graf ({len(graph_docs)})",
-        #     ]
-        # )
-        #
-        # with tabs[0]:
-        #     for i, doc in enumerate(docs, 1):
-        #         render_card(doc, i)
-        # with tabs[1]:
-        #     if decisions:
-        #         for i, doc in enumerate(decisions, 1):
-        #             render_decision_card(doc, i)
-        #     else:
-        #         _ = st.info("Brak decyzji UODO dla tego zapytania.")
-        # with tabs[2]:
-        #     if act_arts:
-        #         for i, doc in enumerate(act_arts, 1):
-        #             render_act_article_card(doc, i)
-        #     else:
-        #         _ = st.info("Brak artykułów ustawy dla tego zapytania.")
-        # with tabs[3]:
-        #     if gdpr_docs:
-        #         for i, doc in enumerate(gdpr_docs, 1):
-        #             render_gdpr_card(doc, i)
-        #     else:
-        #         _ = st.info("Brak artykułów RODO dla tego zapytania.")
-        # with tabs[4]:
-        #     if graph_docs:
-        #         _ = st.info(
-        #             "Decyzje powiązane przez cytowania z wynikami semantic search."
-        #         )
-        #         for i, doc in enumerate(graph_docs, 1):
-        #             render_decision_card(doc, i)
-        #     else:
-        #         _ = st.info("Brak wyników z grafu powiązań.")
-
 
 def _render_analysing(
     effective_query: str,
@@ -512,8 +474,52 @@ def _render_history(
                     _ = st.markdown("## Odpowiedź:")
                     _ = st.markdown("---")
                     _ = st.markdown(entry.full_answer)
+
+                    render_documents(res)
         else:
             pass
+
+
+def render_documents(res: SearchResult):
+    _ = st.markdown(f"### 📋 Dokumenty ({len(res.full)})")
+    tabs = st.tabs(
+        [
+            f"Wszystkie ({len(res.full)})",
+            f"Decyzje UODO ({len(res.decisions)})",
+            f"Ustawa u.o.d.o. ({len(res.act_arts)})",
+            f"RODO ({len(res.gdpr_docs)})",
+            f"Graf ({len(res.graph_docs)})",
+        ]
+    )
+
+    with tabs[0]:
+        for i, doc in enumerate(res.full, 1):
+            render_card(doc)
+    with tabs[1]:
+        if res.decisions:
+            for doc in res.decisions:
+                render_decision_card(doc)
+        else:
+            _ = st.info("Brak decyzji UODO dla tego zapytania.")
+    with tabs[2]:
+        if res.act_arts:
+            for doc in res.act_arts:
+                render_act_article_card(doc)
+        else:
+            _ = st.info("Brak artykułów ustawy dla tego zapytania.")
+    with tabs[3]:
+        if res.gdpr_docs:
+            for doc in res.gdpr_docs:
+                render_gdpr_card(doc)
+        else:
+            _ = st.info("Brak artykułów RODO dla tego zapytania.")
+    with tabs[4]:
+        if res.graph_docs:
+            _ = st.info("Decyzje powiązane przez cytowania z wynikami semantic search.")
+            for doc in res.graph_docs:
+                render_decision_card(doc)
+        else:
+            _ = st.info("Brak wyników z grafu powiązań.")
 
 
 def _render_answer(
@@ -586,6 +592,9 @@ def _render_answer(
                     print(f"Thread id: {thread_id}")
                     id = memory.add(entry, thread_id)
                     st.session_state["thread_id"] = id
+
+                render_documents(res)
+
                 st.rerun()
 
             except Exception as e:
