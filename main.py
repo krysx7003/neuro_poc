@@ -14,7 +14,6 @@ import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
 from config import (
-    DEFAULT_GROQ_MODEL,
     DEFAULT_OLLAMA_MODEL,
     RE_QUERY_SIG,
 )
@@ -75,7 +74,7 @@ def main() -> None:
     answer_placeholder = st.empty()
 
     full_answer = ""
-    _ = _render_answer(
+    _ = answer_query(
         answer_placeholder,
         history_placeholder,
         "",
@@ -86,15 +85,11 @@ def main() -> None:
     with st.sidebar:
         _ = st.markdown("## ⚙️ Opcje")
 
-        provider = st.selectbox("Provider LLM", ["Ollama", "Groq"], key="provider_select")
-
-        # Klucz API tylko dla Groq — Ollama używa OLLAMA_CLOUD_API_KEY z .env
-        models = get_available_models(provider, "")
-        default_model = DEFAULT_OLLAMA_MODEL if provider == "Ollama" else DEFAULT_GROQ_MODEL
+        models = get_available_models("Ollama", "")
+        default_model = DEFAULT_OLLAMA_MODEL
         default_idx = next((i for i, m in enumerate(models) if default_model in m), 0)
         selected_model = st.selectbox("Model", models, index=default_idx)
 
-        st.session_state["llm_provider"] = provider
         st.session_state["llm_model"] = selected_model
 
         # ── Pamięć epizodyczna ───────────────────────────────────────
@@ -322,7 +317,7 @@ def main() -> None:
         st.session_state["last_query"] = effective_query
         st.session_state["last_filters"] = filters
 
-        _render_answer(
+        answer_query(
             answer_placeholder,
             history_placeholder,
             kw_filter,
@@ -408,7 +403,7 @@ def _render_history(
             pass
 
 
-def _render_answer(
+def answer_query(
     placeholder: DeltaGenerator,
     history_placeholder: DeltaGenerator,
     kw_filter: str,
@@ -422,7 +417,7 @@ def _render_answer(
 
         thread = None
         if thread_id is not None:
-            thread = memory.entries[thread_id]
+            thread = memory.threads[thread_id]
 
         _render_history(history_placeholder, thread)
 
@@ -480,6 +475,12 @@ def _render_answer(
                     id = memory.add(entry, thread_id)
                     st.session_state["thread_id"] = id
 
+                # FIXME:
+                # Po wygenerowaniu odpowiedzi uruchom ponownie
+                # by poprawnie odświerzyć listę wątków. Czy
+                # da się to rozwiązać inaczej?
+                st.rerun()
+
             except Exception as e:
                 _ = st.error(f"Błąd LLM: {e}")
 
@@ -516,7 +517,7 @@ def _render_memory(
     with placeholder.container():
         _ = st.markdown("---")
         _ = st.markdown("### 🧠 Historia sesji")
-        for i, thread in enumerate(memory.entries):
+        for i, thread in enumerate(memory.threads):
             if not thread:
                 continue
 

@@ -80,21 +80,21 @@ class MemoryEntry(BaseModel):
 class AgentMemory(BaseModel):
     """Pamięć epizodyczna sesji — wzorzec z lekcji 2.1 Memory Engineering."""
 
-    entries: list[list[MemoryEntry]] = []
+    threads: list[list[MemoryEntry]] = []
     max_entries: int = 5
 
     def add(self, entry: MemoryEntry, id: int | None = None) -> int:
         if id is None:
             id = self.new_thread()
 
-        self.entries[id].append(entry)
+        self.threads[id].append(entry)
 
         return id
 
     def new_thread(self) -> int:
         new_thread: list[MemoryEntry] = []
-        self.entries.append(new_thread)
-        id = len(self.entries) - 1
+        self.threads.append(new_thread)
+        id = len(self.threads) - 1
 
         return id
 
@@ -103,7 +103,7 @@ class AgentMemory(BaseModel):
         q_words = {w.lower() for w in re.split(r"\W+", query) if len(w) > 3}
         return [
             e
-            for e in self.entries[id]
+            for e in self.threads[id]
             if q_words & {w.lower() for w in re.split(r"\W+", e.query) if len(w) > 3}
         ]
 
