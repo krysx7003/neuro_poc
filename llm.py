@@ -1,5 +1,4 @@
-"""
-Wywołania LLM — streaming, JSON, dekompozycja zapytania, lista modeli.
+"""Wywołania LLM — streaming, JSON, dekompozycja zapytania, lista modeli.
 
 Obsługiwani providerzy:
   - Ollama — lokalny daemon (domyślnie http://localhost:11434).
@@ -69,13 +68,10 @@ def get_available_models(provider: str, api_key: str | None = None) -> list[str]
 
 def _ollama_headers() -> dict[str, str]:
     """Nagłówki dla każdego wywołania Ollama — klucz cloud jest zawsze wysyłany.
+
     Dla modeli czysto lokalnych Ollama ignoruje nagłówek Authorization.
     """
-    return (
-        {"Authorization": f"Bearer {OLLAMA_CLOUD_API_KEY}"}
-        if OLLAMA_CLOUD_API_KEY
-        else {}
-    )
+    return {"Authorization": f"Bearer {OLLAMA_CLOUD_API_KEY}"} if OLLAMA_CLOUD_API_KEY else {}
 
 
 def _get_llm_params(
@@ -221,6 +217,7 @@ def decompose_query(
     api_key: str | None = None,
 ) -> QueryDecomposition:
     """LLM analizuje pytanie i generuje ustrukturyzowane parametry wyszukiwania.
+
     Dla krótkich zapytań (≤ 3 słowa) zwraca uproszczoną dekompozycję bez wywołania LLM.
     """
     if len(query.strip().split()) <= 3:

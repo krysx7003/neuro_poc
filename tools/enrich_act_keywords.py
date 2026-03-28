@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
-"""
-enrich_act_keywords.py — generuje keywords dla artykułów u.o.d.o. i RODO przez LLM
-i aktualizuje payloady bezpośrednio w Qdrant (bez przeindeksowania).
+"""enrich_act_keywords.py — generuje keywords dla artykułów u.o.d.o. i RODO przez LLM i aktualizuje payloady bezpośrednio w Qdrant (bez przeindeksowania).
 
 Uruchomienie:
   python enrich_act_keywords.py --provider ollama --model qwen3:14b
@@ -20,11 +17,10 @@ Opcje:
 """
 
 import argparse
-import json
 import os
-import sys
 import time
-from typing import Dict, List
+
+from config import QDRANT_URL
 
 try:
     from dotenv import load_dotenv
@@ -33,7 +29,6 @@ try:
 except ImportError:
     pass
 
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 OLLAMA_CLOUD_API_KEY = os.getenv("OLLAMA_CLOUD_API_KEY", "")
 OLLAMA_CLOUD_URL = os.getenv("OLLAMA_CLOUD_URL", "https://ollama.com")
@@ -43,7 +38,7 @@ OLLAMA_LOCAL_URL = os.getenv("OLLAMA_LOCAL_URL", "http://localhost:11434")
 # (pobierane dynamicznie z Qdrant)
 
 
-def get_existing_tags(client, collection: str) -> List[str]:
+def get_existing_tags(client, collection: str) -> list[str]:
     """Pobiera wszystkie unikalne tagi z decyzji UODO."""
     from qdrant_client.models import FieldCondition, Filter, MatchValue
 
@@ -54,11 +49,7 @@ def get_existing_tags(client, collection: str) -> List[str]:
             collection_name=collection,
             limit=500,
             scroll_filter=Filter(
-                must=[
-                    FieldCondition(
-                        key="doc_type", match=MatchValue(value="uodo_decision")
-                    )
-                ]
+                must=[FieldCondition(key="doc_type", match=MatchValue(value="uodo_decision"))]
             ),
             with_payload=["keywords"],
             with_vectors=False,
@@ -95,9 +86,7 @@ def call_llm(prompt: str, provider: str, model: str, api_key: str) -> str:
             try:
                 headers = {}
                 if base_url == OLLAMA_CLOUD_URL:
-                    headers["Authorization"] = (
-                        f"Bearer {api_key or OLLAMA_CLOUD_API_KEY}"
-                    )
+                    headers["Authorization"] = f"Bearer {api_key or OLLAMA_CLOUD_API_KEY}"
                 resp = requests.post(
                     f"{base_url}/api/chat",
                     headers=headers,
@@ -118,13 +107,12 @@ def generate_keywords(
     article_num: str,
     content: str,
     doc_type: str,
-    existing_tags: List[str],
+    existing_tags: list[str],
     provider: str,
     model: str,
     api_key: str,
-) -> List[str]:
+) -> list[str]:
     """Generuje keywords dla artykułu przez LLM."""
-
     if doc_type == "legal_act_article":
         source = "ustawy o ochronie danych osobowych (u.o.d.o.)"
         label = f"Art. {article_num} u.o.d.o."
@@ -166,7 +154,7 @@ def enrich_documents(
     provider: str,
     model: str,
     api_key: str,
-    doc_types: List[str],
+    doc_types: list[str],
     dry_run: bool,
     delay: float,
 ):
@@ -260,9 +248,7 @@ def enrich_documents(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Generuje keywords dla artykułów u.o.d.o. i RODO"
-    )
+    parser = argparse.ArgumentParser(description="Generuje keywords dla artykułów u.o.d.o. i RODO")
     parser.add_argument("--qdrant", default=QDRANT_URL)
     parser.add_argument("--collection", default="uodo_decisions")
     parser.add_argument("--provider", default="ollama", choices=["ollama", "groq"])

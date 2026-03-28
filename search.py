@@ -1,7 +1,4 @@
-"""
-
-Wyszukiwanie — Qdrant (semantic + keyword), graf powiązań, tagi LLM, taksonomia.
-"""
+"""Wyszukiwanie — Qdrant (semantic + keyword), graf powiązań, tagi LLM, taksonomia."""
 
 import os
 import pickle
@@ -32,11 +29,7 @@ from config import (
 
 @st.cache_resource
 def get_qdrant() -> QdrantClient:
-    print(f"QDRANT API KEY: {QDRANT_API_KEY}")
-    print(f"QDRANT URL: {QDRANT_URL}")
-    return QdrantClient(
-        url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30, cloud_inference=True
-    )
+    return QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30, cloud_inference=True)
 
 
 @st.cache_resource
@@ -111,24 +104,16 @@ def _build_qdrant_filter(filters: dict[str, Any] | None) -> Filter | None:
     if not filters:
         return None
     if filters.get("status"):
-        must.append(
-            FieldCondition(key="status", match=MatchValue(value=filters["status"]))
-        )
+        must.append(FieldCondition(key="status", match=MatchValue(value=filters["status"])))
     if filters.get("keyword"):
-        must.append(
-            FieldCondition(key="keywords", match=MatchValue(value=filters["keyword"]))
-        )
+        must.append(FieldCondition(key="keywords", match=MatchValue(value=filters["keyword"])))
     if filters.get("doc_types"):
-        must.append(
-            FieldCondition(key="doc_type", match=MatchAny(any=filters["doc_types"]))
-        )
+        must.append(FieldCondition(key="doc_type", match=MatchAny(any=filters["doc_types"])))
     if filters.get("year_from") or filters.get("year_to"):
         must.append(
             FieldCondition(
                 key="year",
-                range=Range(
-                    gte=filters.get("year_from", 2000), lte=filters.get("year_to", 2030)
-                ),
+                range=Range(gte=filters.get("year_from", 2000), lte=filters.get("year_to", 2030)),
             )
         )
     for term_field in (
@@ -220,9 +205,7 @@ def fetch_by_signature(sig: str) -> dict[str, Any] | None:
 # ─────────────────────────── GRAF POWIĄZAŃ ───────────────────────
 
 
-def graph_expand(
-    seed_sigs: list[str], depth: int = GRAPH_DEPTH
-) -> list[tuple[str, str, float]]:
+def graph_expand(seed_sigs: list[str], depth: int = GRAPH_DEPTH) -> list[tuple[str, str, float]]:
     G = get_graph()
     if G is None:
         return []
@@ -277,11 +260,7 @@ def get_taxonomy_options() -> dict[str, list[str]]:
                 limit=500,
                 offset=offset,
                 scroll_filter=Filter(
-                    must=[
-                        FieldCondition(
-                            key="doc_type", match=MatchValue(value="uodo_decision")
-                        )
-                    ]
+                    must=[FieldCondition(key="doc_type", match=MatchValue(value="uodo_decision"))]
                 ),
                 with_payload=dynamic_fields,
                 with_vectors=False,
@@ -330,6 +309,7 @@ def get_all_tags() -> list[str]:
 
 def extract_tags_with_llm(query: str, available_tags: list[str]) -> list[str]:
     """Pyta LLM o tagi pasujące do zapytania (fallback gdy brak bezpośredniego trafienia).
+
     Używa call_llm_json z llm.py — jednolite wywołanie Ollama/Groq przez jedną ścieżkę.
     """
     # Import tutaj żeby uniknąć cyklicznych zależności (llm.py importuje z config)
@@ -450,25 +430,19 @@ def hybrid_search(
         if w.lower() not in QUERY_STOPWORDS and len(w) > 2
     ]
     direct_phrases: list[str] = list(
-        dict.fromkeys(
-            words + [f"{words[i]} {words[i + 1]}" for i in range(len(words) - 1)]
-        )
+        dict.fromkeys(words + [f"{words[i]} {words[i + 1]}" for i in range(len(words) - 1)])
     )
     all_tags_lower = {t.lower(): t for t in get_all_tags()}
     direct_hits = [all_tags_lower[p] for p in direct_phrases if p in all_tags_lower]
 
     for tag in direct_hits:
-        for d in keyword_exact_search(
-            tag, {**filters_base, "doc_types": ["uodo_decision"]}
-        ):
+        for d in keyword_exact_search(tag, {**filters_base, "doc_types": ["uodo_decision"]}):
             _add(decisions, d)
 
     # 1c. Tagi LLM — tylko gdy 1b nic nie znalazło (fraza nie jest tagiem)
     if not decisions and matched_tags:
         for tag in matched_tags:
-            for d in keyword_exact_search(
-                tag, {**filters_base, "doc_types": ["uodo_decision"]}
-            ):
+            for d in keyword_exact_search(tag, {**filters_base, "doc_types": ["uodo_decision"]}):
                 _add(decisions, d)
 
     # 1d. Semantic — ostatni fallback gdy tagi nic nie dały
@@ -513,9 +487,7 @@ def hybrid_search(
     gdpr_types = ["gdpr_article", "gdpr_recital"]
 
     if explicit_keyword:
-        for d in keyword_exact_search(
-            explicit_keyword, {**filters_base, "doc_types": gdpr_types}
-        ):
+        for d in keyword_exact_search(explicit_keyword, {**filters_base, "doc_types": gdpr_types}):
             if len(gdpr_docs) >= MAX_GDPR_DOCS:
                 break
             _add(gdpr_docs, d)
@@ -590,9 +562,7 @@ def get_collection_stats() -> dict[str, Any]:
     G = get_graph()
     graph_stats: dict[str, Any] = {}
     if G:
-        uodo = [
-            n for n, d in G.nodes(data=True) if d.get("doc_type") == "uodo_decision"
-        ]
+        uodo = [n for n, d in G.nodes(data=True) if d.get("doc_type") == "uodo_decision"]
         most_cited = sorted(
             [(n, G.in_degree(n)) for n in uodo if G.in_degree(n) > 0],
             key=lambda x: -x[1],

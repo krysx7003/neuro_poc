@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-"""
-eval.py — Automatyczna ewaluacja systemu UODO RAG.
+"""eval.py — Automatyczna ewaluacja systemu UODO RAG.
 
 Wzorzec z kursu Software 3.0 (lekcja 5.2–5.3): binarny leaderboard
 zamiast subiektywnych ocen 1–10. Każdy test zwraca 0 lub 1.
@@ -21,19 +19,19 @@ import sys
 import time
 from typing import Any
 
+from config import COLLECTION_NAME, EMBED_MODEL, QDRANT_API_KEY, QDRANT_URL
+
 # ─────────────────────────── KONFIGURACJA ────────────────────────
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
 
-QDRANT_URL      = os.getenv("QDRANT_URL", "http://localhost:6333")
-COLLECTION_NAME = "uodo_decisions"
-EMBED_MODEL     = os.getenv("EMBED_MODEL", "sdadas/mmlw-retrieval-roberta-large")
-GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")
-DEFAULT_MODEL   = "llama-3.3-70b-versatile"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+DEFAULT_MODEL = "llama-3.3-70b-versatile"
 
 # ─────────────────────────── ZŁOTE PYTANIA ────────────────────────
 # 10 pytań ze zdefiniowanymi kryteriami sukcesu.
@@ -96,7 +94,10 @@ GOLDEN_QUESTIONS: list[dict[str, Any]] = [
         "question": "Jakie obowiązki ma administrator danych wobec osoby, której dane dotyczą?",
         "description": "Odpowiedź powinna wymienić obowiązek informacyjny",
         "checks": [
-            lambda a: any(w in a.lower() for w in ["informacyjny", "obowiązek informacyjny", "art. 13", "art. 14"]),
+            lambda a: any(
+                w in a.lower()
+                for w in ["informacyjny", "obowiązek informacyjny", "art. 13", "art. 14"]
+            ),
             lambda a: any(w in a.lower() for w in ["administrator", "podmiot"]),
             lambda a: "art" in a.lower(),
         ],
@@ -127,7 +128,9 @@ GOLDEN_QUESTIONS: list[dict[str, Any]] = [
         "description": "Odpowiedź powinna wymienić prawa: dostęp, sprostowanie, usunięcie, przenoszenie",
         "checks": [
             lambda a: any(w in a.lower() for w in ["dostęp", "wgląd"]),
-            lambda a: any(w in a.lower() for w in ["usunięcie", "zapomnienie", "prawo do bycia zapomnianym"]),
+            lambda a: any(
+                w in a.lower() for w in ["usunięcie", "zapomnienie", "prawo do bycia zapomnianym"]
+            ),
             lambda a: any(w in a.lower() for w in ["sprostowanie", "poprawienie"]),
         ],
         "check_names": [
@@ -141,7 +144,9 @@ GOLDEN_QUESTIONS: list[dict[str, Any]] = [
         "question": "Co to jest umowa powierzenia przetwarzania danych?",
         "description": "Odpowiedź powinna wyjaśnić umowę powierzenia i Art. 28 RODO",
         "checks": [
-            lambda a: any(w in a.lower() for w in ["powierzenie", "procesor", "podmiot przetwarzający"]),
+            lambda a: any(
+                w in a.lower() for w in ["powierzenie", "procesor", "podmiot przetwarzający"]
+            ),
             lambda a: "art" in a.lower() and "28" in a,
             lambda a: any(w in a.lower() for w in ["umowa", "kontrakt"]),
         ],
@@ -157,7 +162,10 @@ GOLDEN_QUESTIONS: list[dict[str, Any]] = [
         "description": "Odpowiedź powinna wymienić przykłady danych wrażliwych z Art. 9 RODO",
         "checks": [
             lambda a: any(w in a.lower() for w in ["szczególne", "wrażliwe", "art. 9", "art 9"]),
-            lambda a: any(w in a.lower() for w in ["zdrowie", "genetyczne", "rasowe", "biometryczne", "wyznanie"]),
+            lambda a: any(
+                w in a.lower()
+                for w in ["zdrowie", "genetyczne", "rasowe", "biometryczne", "wyznanie"]
+            ),
             lambda a: "rodo" in a.lower() or "art" in a.lower(),
         ],
         "check_names": [
@@ -172,7 +180,17 @@ GOLDEN_QUESTIONS: list[dict[str, Any]] = [
         "description": "Odpowiedź powinna opisać mechanizmy transferu (rozdział V RODO)",
         "checks": [
             lambda a: any(w in a.lower() for w in ["kraj trzeci", "transfer", "przekazanie"]),
-            lambda a: any(w in a.lower() for w in ["adequacy", "adequateness", "odpowiedni stopień ochrony", "standardowe klauzule", "bcr", "wiążące reguły"]),
+            lambda a: any(
+                w in a.lower()
+                for w in [
+                    "adequacy",
+                    "adequateness",
+                    "odpowiedni stopień ochrony",
+                    "standardowe klauzule",
+                    "bcr",
+                    "wiążące reguły",
+                ]
+            ),
             lambda a: "art" in a.lower() or "rozdział v" in a.lower(),
         ],
         "check_names": [
@@ -187,7 +205,9 @@ GOLDEN_QUESTIONS: list[dict[str, Any]] = [
         "description": "Odpowiedź powinna opisać zasady z Art. 5 RODO",
         "checks": [
             lambda a: "minimalizacja" in a.lower() or "minimalizację" in a.lower(),
-            lambda a: any(w in a.lower() for w in ["cel", "ograniczenie celu", "purpose limitation"]),
+            lambda a: any(
+                w in a.lower() for w in ["cel", "ograniczenie celu", "purpose limitation"]
+            ),
             lambda a: "art" in a.lower() and "5" in a,
         ],
         "check_names": [
@@ -203,20 +223,27 @@ GOLDEN_QUESTIONS: list[dict[str, Any]] = [
 
 def get_embedder():
     from sentence_transformers import SentenceTransformer
+
     return SentenceTransformer(EMBED_MODEL)
 
 
 def semantic_search(query: str, top_k: int = 8) -> list[dict[str, Any]]:
     from qdrant_client import QdrantClient
-    from qdrant_client.models import Filter, FieldCondition, MatchAny
-    client = QdrantClient(url=QDRANT_URL)
+    from qdrant_client.models import FieldCondition, Filter, MatchAny
+
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     embedder = get_embedder()
     vec = embedder.encode(query).tolist()
-    qdrant_filter = Filter(must=[
-        FieldCondition(key="doc_type", match=MatchAny(any=[
-            "uodo_decision", "legal_act_article", "gdpr_article", "gdpr_recital"
-        ]))
-    ])
+    qdrant_filter = Filter(
+        must=[
+            FieldCondition(
+                key="doc_type",
+                match=MatchAny(
+                    any=["uodo_decision", "legal_act_article", "gdpr_article", "gdpr_recital"]
+                ),
+            )
+        ]
+    )
     results = client.search(
         collection_name=COLLECTION_NAME,
         query_vector=vec,
@@ -259,6 +286,7 @@ def build_simple_context(docs: list[dict[str, Any]], query: str, max_chars: int 
 def call_llm(query: str, context: str) -> str:
     """Wywołuje LLM i zwraca pełną odpowiedź (bez streamowania)."""
     from groq import Groq
+
     client = Groq(api_key=GROQ_API_KEY)
     system = (
         "Jesteś ekspertem prawa ochrony danych osobowych. "
@@ -283,10 +311,10 @@ def call_llm(query: str, context: str) -> str:
 
 def run_single(gq: dict[str, Any], verbose: bool = False) -> dict[str, Any]:
     """Uruchamia jeden test i zwraca wyniki."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {gq['id']}: {gq['question']}")
     print(f"  {gq['description']}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     t0 = time.time()
     try:
@@ -295,7 +323,14 @@ def run_single(gq: dict[str, Any], verbose: bool = False) -> dict[str, Any]:
         answer = call_llm(gq["question"], context)
     except Exception as e:
         print(f"  ❌ BŁĄD: {e}")
-        return {"id": gq["id"], "question": gq["question"], "error": str(e), "checks": [], "passed": 0, "total": len(gq["checks"])}
+        return {
+            "id": gq["id"],
+            "question": gq["question"],
+            "error": str(e),
+            "checks": [],
+            "passed": 0,
+            "total": len(gq["checks"]),
+        }
 
     elapsed = time.time() - t0
 
@@ -335,11 +370,11 @@ def run_all(question_idx: int | None = None, verbose: bool = False) -> None:
             sys.exit(1)
         questions = [questions[idx]]
 
-    print(f"\n{'#'*60}")
+    print(f"\n{'#' * 60}")
     print(f"  UODO RAG — Ewaluacja ({len(questions)} pytań)")
     print(f"  Model: {DEFAULT_MODEL}")
     print(f"  Qdrant: {QDRANT_URL}/{COLLECTION_NAME}")
-    print(f"{'#'*60}")
+    print(f"{'#' * 60}")
 
     all_results = []
     for gq in questions:
@@ -352,9 +387,9 @@ def run_all(question_idx: int | None = None, verbose: bool = False) -> None:
     total_questions = len(all_results)
     perfect = sum(1 for r in all_results if r["passed"] == r["total"])
 
-    print(f"\n{'#'*60}")
-    print(f"  PODSUMOWANIE LEADERBOARDU")
-    print(f"{'#'*60}")
+    print(f"\n{'#' * 60}")
+    print("  PODSUMOWANIE LEADERBOARDU")
+    print(f"{'#' * 60}")
     print(f"  Pytania: {perfect}/{total_questions} w pełni zdanych")
     print(f"  Sprawdzenia: {total_passed}/{total_checks} zdanych")
     pct = total_passed / total_checks * 100 if total_checks else 0
@@ -362,7 +397,7 @@ def run_all(question_idx: int | None = None, verbose: bool = False) -> None:
 
     # Tabela wyników
     print(f"\n  {'ID':<10} {'Zdanych':<10} {'Wynik'}")
-    print(f"  {'-'*40}")
+    print(f"  {'-' * 40}")
     for r in all_results:
         bar = "█" * r["passed"] + "░" * (r["total"] - r["passed"])
         icon = "✅" if r["passed"] == r["total"] else ("⚠️" if r["passed"] > 0 else "❌")
@@ -371,18 +406,23 @@ def run_all(question_idx: int | None = None, verbose: bool = False) -> None:
     # Zapisz wyniki do JSON
     output_path = "eval_results.json"
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "model": DEFAULT_MODEL,
-            "summary": {
-                "questions_perfect": perfect,
-                "questions_total": total_questions,
-                "checks_passed": total_passed,
-                "checks_total": total_checks,
-                "score_pct": round(pct, 1),
+        json.dump(
+            {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "model": DEFAULT_MODEL,
+                "summary": {
+                    "questions_perfect": perfect,
+                    "questions_total": total_questions,
+                    "checks_passed": total_passed,
+                    "checks_total": total_checks,
+                    "score_pct": round(pct, 1),
+                },
+                "results": all_results,
             },
-            "results": all_results,
-        }, f, ensure_ascii=False, indent=2)
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
     print(f"\n  Wyniki zapisane: {output_path}")
 
 

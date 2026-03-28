@@ -1,5 +1,4 @@
-"""
-Modele danych (Pydantic) i szablony Jinja2 kontekstu LLM.
+"""Modele danych (Pydantic) i szablony Jinja2 kontekstu LLM.
 
 Wzorce z kursu Software 3.0:
   - QueryDecomposition → Reasoning Step (moduł 4.1)
@@ -42,12 +41,8 @@ class QueryDecomposition(BaseModel):
     )
     year_from_hint: int | None = None
     year_to_hint: int | None = None
-    enriched_query: str = Field(
-        description="Rozszerzone zapytanie do wyszukiwania semantycznego"
-    )
-    reasoning: str = Field(
-        description="Krótkie uzasadnienie dekompozycji (widoczne w UI)"
-    )
+    enriched_query: str = Field(description="Rozszerzone zapytanie do wyszukiwania semantycznego")
+    reasoning: str = Field(description="Krótkie uzasadnienie dekompozycji (widoczne w UI)")
 
 
 class SearchResult(BaseModel):
@@ -60,16 +55,12 @@ class SearchResult(BaseModel):
     search_time: float
 
     @classmethod
-    def from_docs(
-        cls, docs: list[dict[str, Any]], tags: list[str], time: float
-    ) -> "SearchResult":
+    def from_docs(cls, docs: list[dict[str, Any]], tags: list[str], time: float) -> "SearchResult":
         return cls(
             full=docs,
             decisions=[d for d in docs if d.get("doc_type") == "uodo_decision"],
             act_arts=[d for d in docs if d.get("doc_type") == "legal_act_article"],
-            gdpr_docs=[
-                d for d in docs if d.get("doc_type") in ("gdpr_article", "gdpr_recital")
-            ],
+            gdpr_docs=[d for d in docs if d.get("doc_type") in ("gdpr_article", "gdpr_recital")],
             graph_docs=[d for d in docs if d.get("_source") == "graph"],
             tags=tags,
             search_time=time,
