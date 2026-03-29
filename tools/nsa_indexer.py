@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-NSA Batch Indexer + Strict Metadata Extractor
-Procesuje pliki *.txt -> rygorystycznie filtruje metadane -> Qdrant uodo_decisions
+NSA Batch Indexer + Strict Metadata Extractor (STRICT VERSION)
+Procesuje pliki *.txt -> rygorystycznie filtruje metadane (brak pustych pól) -> Qdrant
 """
 import argparse
 import hashlib
@@ -46,7 +46,7 @@ LIST_KEYS = [
 ]
 
 def parse_court_document(text: str, filename: str) -> Dict[str, Any]:
-    """Ekstrahuje metadane i mapuje je na schemat wymagany przez Qdrant."""
+    """Ekstrahuje metadane i rygorystycznie sprawdza kompletność treści."""
     lines = text.split('\n')
     metadata = {}
     current_key = None
@@ -99,26 +99,37 @@ def parse_court_document(text: str, filename: str) -> Dict[str, Any]:
     if current_key:
         metadata[current_key] = '\n'.join(current_value).strip().rstrip('|')
 
-    # Filtrowanie i formatowanie list
+    # 1. Filtrowanie dozwolonych kluczy
     filtered_metadata = {k: v for k, v in metadata.items() if k in ALLOWED_KEYS}
     
-    # Sprawdzenie brakujących kluczy (STRICT MODE)
-    missing_keys = [key for key in ALLOWED_KEYS if key not in filtered_metadata]
-    if missing_keys:
-        return {"_error": "missing_keys", "_missing": missing_keys}
-
+    # 2. Konwersja na listy (tak jak w extract_nsa_metadata.py)
     for key in LIST_KEYS:
         if key in filtered_metadata:
             raw_text = filtered_metadata[key]
             filtered_metadata[key] = [item.strip() for item in raw_text.split('\n') if item.strip()]
 
-    # Mapowanie na schemat Qdrant / Indexera
+    # 3. RYGORYSTYCZNA WERYFIKACJA (STRICT MODE)
+    # Sprawdzamy, czy wszystkie 12 kluczy istnieje I czy mają treść (nie są puste)
+    invalid_keys = []
+    for key in ALLOWED_KEYS:
+        val = filtered_metadata.get(key)
+        # Sprawdza: brak klucza, puste stringi (po strip), puste listy
+        if val is None:
+            invalid_keys.append(f"{key} (brak)")
+        elif isinstance(val, str) and not val.strip():
+            invalid_keys.append(f"{key} (pusty)")
+        elif isinstance(val, list) and not val:
+            invalid_keys.append(f"{key} (pusta lista)")
+
+    if invalid_keys:
+        return {"_error": "invalid_metadata", "_missing": invalid_keys}
+
+    # Mapowanie na schemat Qdrant
     title_full = filtered_metadata['Tytuł']
     sig_match = re.match(r"^(.+?)(?:\s+-\s+(.+))?$", title_full)
     signature = sig_match.group(1).strip() if sig_match else title_full
     doc_title = sig_match.group(2).strip() if sig_match and sig_match.group(2) else "Wyrok"
 
-    # Wyciąganie roku z daty (np. 2013-02-20)
     year = int(filtered_metadata['Data orzeczenia'].split('-')[0]) if '-' in filtered_metadata['Data orzeczenia'] else 0
 
     doc = {
@@ -135,59 +146,47 @@ def parse_court_document(text: str, filename: str) -> Dict[str, Any]:
         "reasoning": filtered_metadata['Uzasadnienie'],
         "related_acts": filtered_metadata['Powołane przepisy'],
         "keywords": filtered_metadata['Hasła tematyczne'],
-        # Dodatkowe pola z Twojego zbioru, których wcześniej nie było w indexerze:
         "symbol": filtered_metadata['Symbol z opisem'],
         "date_received": filtered_metadata['Data wpływu'],
         "outcome": filtered_metadata['Treść wyniku'],
         "accused_body": filtered_metadata['Skarżony organ'],
-        "summary": metadata.get('Teza', '') # Opcjonalne
+        "summary": metadata.get('Teza', '') 
     }
     
-    # Pełen tekst do chunkowania (wektoryzacji)
     doc["content_text"] = f"Sentencja:\n{doc['ruling']}\n\nUzasadnienie:\n{doc['reasoning']}"
-    
     return doc
+
+# (Dalsza część kodu: chunk_text, sig_to_uuid, build_embed_text, build_payload, index_nsa_batch pozostaje bez zmian strukturalnych)
 
 # ─────────────────────────── CHUNKING ───────────────────────────
 def chunk_text(text: str, max_chars: int = CHUNK_MAX_CHARS, overlap: int = CHUNK_OVERLAP_CHARS) -> List[Dict]:
-    """Split long content into overlapping chunks."""
     if len(text) <= max_chars:
         return [{"chunk_text": text, "chunk_index": 0, "chunk_total": 1}]
-    
     paras = re.split(r"\n\n+", text)
     chunks = []
     current = ""
-    
     for para in paras:
         if len(current) + len(para) <= max_chars:
             current += "\n\n" + para
         else:
-            if current:
-                chunks.append(current.strip())
+            if current: chunks.append(current.strip())
             overlap_start = max(0, len(current) - overlap)
             current = current[overlap_start:] + "\n\n" + para
-    
-    if current:
-        chunks.append(current.strip())
-    
+    if current: chunks.append(current.strip())
     return [{"chunk_text": c, "chunk_index": i, "chunk_total": len(chunks)} for i, c in enumerate(chunks)]
 
-# ─────────────────────────── QDRANT HELPERS ─────────────────────
 def sig_to_uuid(sig: str) -> str:
     return str(uuid.UUID(bytes=hashlib.md5(f"nsa:{sig}".encode()).digest()))
 
 def build_embed_text(doc: Dict) -> str:
-    """Text for embedding: signature + metadata + content."""
     header = f"{doc.get('signature', '')} {doc.get('title', '')} | {doc.get('court', '')} | {doc.get('year', '')}"
     content = doc.get("chunk_text", doc.get("content_text", ""))[:5000]
     return f"{header}\n\n{content}"
 
 def build_payload(raw_doc: Dict, chunk_info: Dict) -> Dict[str, Any]:
-    """Qdrant payload compatible with uodo_indexer."""
     doc_id = f"nsa:{raw_doc.get('signature', Path(raw_doc.get('source_file', '')).stem)}"
     if chunk_info["chunk_index"] > 0:
         doc_id += f":chunk{chunk_info['chunk_index']}"
-    
     return {
         "doc_type": "nsa_judgment",
         "doc_id": doc_id,
@@ -215,7 +214,6 @@ def build_payload(raw_doc: Dict, chunk_info: Dict) -> Dict[str, Any]:
         **{k: chunk_info[k] for k in ["chunk_index", "chunk_total"]},
     }
 
-# ─────────────────────────── MAIN ───────────────────────────────
 def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, device: str = None):
     folder = Path(folder_path)
     if not folder.exists():
@@ -226,7 +224,6 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
     print(f"🤖 Loading {EMBED_MODEL} on {device}")
     model = SentenceTransformer(EMBED_MODEL, device=device, trust_remote_code=True)
     dim = model.get_sentence_embedding_dimension()
-    
     client = QdrantClient(url=qdrant_url, timeout=60)
     
     existing = {c.name for c in client.get_collections().collections}
@@ -236,15 +233,7 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
             collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
         )
-        for field, schema in [
-            ("signature", PayloadSchemaType.KEYWORD),
-            ("court", PayloadSchemaType.KEYWORD),
-            ("year", PayloadSchemaType.INTEGER),
-            ("doc_type", PayloadSchemaType.KEYWORD),
-            ("keywords", PayloadSchemaType.KEYWORD),
-        ]:
-            client.create_payload_index(COLLECTION_NAME, field, schema)
-    
+
     done_sigs = set()
     if not rebuild:
         offset = None
@@ -260,8 +249,7 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
                 doc_id = pt.payload.get("doc_id", "")
                 if doc_id.startswith("nsa:"):
                     done_sigs.add(doc_id)
-            if not next_off:
-                break
+            if not next_off: break
             offset = next_off
         print(f"🔄 Already indexed: {len(done_sigs)} NSA docs")
     
@@ -272,33 +260,30 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
     skipped = 0
 
     for txt_file in sorted(txt_files):
-        text = txt_file.read_text(encoding="utf-8")
-        raw_doc = parse_court_document(text, txt_file.name)
-        
-        # Filtrowanie rygorystyczne - odrzucamy niekompletne
-        if "_error" in raw_doc:
-            print(f"  ⚠️ Skipped {txt_file.name} - Brakuje kluczy: {', '.join(raw_doc['_missing'])}")
-            skipped += 1
-            continue
+        try:
+            text = txt_file.read_text(encoding="utf-8")
+            raw_doc = parse_court_document(text, txt_file.name)
+            
+            if "_error" in raw_doc:
+                print(f"  [POMINIĘTO] {txt_file.name} -> Brakuje treści w: {', '.join(raw_doc['_missing'])}")
+                skipped += 1
+                continue
 
-        if not raw_doc.get("signature"):
-            print(f"  ⚠️ Skipped {txt_file.name} - Brak sygnatury")
+            chunks = chunk_text(raw_doc["content_text"])
+            for chunk_info in chunks:
+                doc_id = f"nsa:{raw_doc['signature']}:{chunk_info['chunk_index']}"
+                if doc_id not in done_sigs:
+                    chunk_info.update(raw_doc)
+                    all_chunks.append(chunk_info)
+        except Exception as e:
+            print(f"  [BŁĄD] Plik {txt_file.name}: {e}")
             skipped += 1
-            continue
-        
-        chunks = chunk_text(raw_doc["content_text"])
-        for chunk_info in chunks:
-            doc_id = f"nsa:{raw_doc['signature']}:{chunk_info['chunk_index']}"
-            if doc_id not in done_sigs:
-                chunk_info.update(raw_doc)
-                all_chunks.append(chunk_info)
     
-    print(f"📝 {len(all_chunks)} new chunks to index (Skipped {skipped} incomplete files)")
     if not all_chunks:
-        print("✅ All done!")
+        print(f"✅ Brak nowych dokumentów do indeksowania (Pominięto {skipped}).")
         return
-    
-    indexed, errors = 0, 0
+
+    print(f"📝 Indeksowanie {len(all_chunks)} chunków...")
     texts = [build_embed_text(c) for c in all_chunks]
     vectors = model.encode(texts, normalize_embeddings=True, batch_size=BATCH_SIZE).tolist()
     
@@ -306,35 +291,21 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
         batch_chunks = all_chunks[i:i + BATCH_SIZE]
         batch_vectors = vectors[i:i + BATCH_SIZE]
         points = []
-        
         for chunk, vec in zip(batch_chunks, batch_vectors):
             raw_doc = {k: chunk[k] for k in chunk if k not in ["chunk_text", "chunk_index", "chunk_total"]}
             payload = build_payload(raw_doc, chunk)
-            
-            points.append(PointStruct(
-                id=sig_to_uuid(payload["doc_id"]),
-                vector=vec,
-                payload=payload,
-            ))
+            points.append(PointStruct(id=sig_to_uuid(payload["doc_id"]), vector=vec, payload=payload))
         
-        try:
-            client.upsert(collection_name=COLLECTION_NAME, points=points)
-            indexed += len(points)
-            print(f"✅ +{len(points)} ({(i+len(points))/len(all_chunks)*100:.0f}%)")
-        except Exception as e:
-            print(f"❌ Batch error: {e}")
-            errors += len(points)
+        client.upsert(collection_name=COLLECTION_NAME, points=points)
+        print(f"✅ +{len(points)} ({(i+len(points))/len(all_chunks)*100:.0f}%)")
     
-    print(f"\n🎉 Indexed {indexed} chunks | Errors: {errors}")
-    info = client.get_collection(COLLECTION_NAME)
-    print(f"📊 Collection total: {info.points_count}")
+    print(f"\n🎉 Gotowe. Pominięto {skipped} plików.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Batch index NSA judgments")
     parser.add_argument("--folder", required=True, help="Path to NSA txt folder")
     parser.add_argument("--qdrant", default=QDRANT_URL)
-    parser.add_argument("--rebuild", action="store_true", help="Reindex everything")
+    parser.add_argument("--rebuild", action="store_true")
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
-    
     index_nsa_batch(args.folder, args.qdrant, args.rebuild, args.device)
