@@ -13,6 +13,8 @@ from models import (
     TPL_GDPR,
     TPL_HEADER,
     AgentMemory,
+    QueryDecomposition,
+    SearchResult,
 )
 
 UODO_CSS = """
@@ -215,9 +217,12 @@ def build_context(
 
 
 # ─────────────────────────── KARTY WYNIKÓW ───────────────────────
-
-
 def decision_url(doc: dict[str, Any]) -> str:
+    """Tworzy adres url decyzji.
+
+    1. Jeżeli dokument ma pole 'source_url' zwraca jego zawartość
+    2. Jeżeli brakuje tego pola url generowany jest na podstawie sygnatury
+    """
     sig = doc.get("signature", "")
     url = doc.get("source_url", "")
     if url:
@@ -231,6 +236,7 @@ def decision_url(doc: dict[str, Any]) -> str:
 
 
 def render_decision_card(doc: dict[str, Any]) -> None:
+    """Wyświetla dane dokumentu typu decyzja."""
     sig = doc.get("signature", "?")
     status = doc.get("status", "")
     date = doc.get("date_published", "") or doc.get("date_issued", "")
@@ -318,6 +324,7 @@ def render_decision_card(doc: dict[str, Any]) -> None:
 
 
 def render_act_article_card(doc: dict[str, Any]) -> None:
+    """Wyświetla dane dokumentu typu artykuł."""
     art_num = doc.get("article_num", "?")
     chunk_idx = doc.get("chunk_index", 0)
     total = doc.get("chunk_total", 1)
@@ -345,6 +352,7 @@ def render_act_article_card(doc: dict[str, Any]) -> None:
 
 
 def render_gdpr_card(doc: dict[str, Any]) -> None:
+    """Wyświetla dane dokumentu typu GDPR."""
     art_num = doc.get("article_num", "?")
     chunk_idx = doc.get("chunk_index", 0)
     total = doc.get("chunk_total", 1)
@@ -390,3 +398,87 @@ def render_card(doc: dict[str, Any]) -> None:
         render_gdpr_card(doc)
     else:
         render_decision_card(doc)
+
+
+def render_tags(res: SearchResult, kw_filter: str | None = None):
+    """Wyświetla podsumowanie wyników wyszukiwania dokumentów."""
+    _tag_info: str | None = None
+    if kw_filter:
+        _tag_info = f" · tag: `{kw_filter}`" if kw_filter.strip() else ""
+
+    if res.tags:
+        with st.expander("🏷️ Tagi", expanded=False):
+            for t in res.tags:
+                _ = st.caption(f"`{t}`")
+
+    caption = f"""
+    Znaleziono {len(res.full)} dokumentów 
+    ({len(res.decisions)} decyzji, {len(res.act_arts)} u.o.d.o., 
+    {len(res.gdpr_docs)} RODO, {len(res.graph_docs)} przez graf) · {res.search_time:.2f}s"""
+
+    if _tag_info:
+        caption += _tag_info
+
+    _ = st.caption(caption)
+
+
+def render_reasoning(decomp: QueryDecomposition, effective_query: str):
+    """Wyświetla dekomopzycje zapytania."""
+    with st.expander("🧠 Reasoning Step — jak zrozumiałem pytanie", expanded=False):
+        _ = st.caption(f"**Typ zapytania:** {decomp.query_type.value}")
+        _ = st.caption(f"**Rozumowanie:** {decomp.reasoning}")
+        if decomp.search_keywords:
+            _ = st.caption(
+                "**Słowa kluczowe:** " + " · ".join(f"`{k}`" for k in decomp.search_keywords)
+            )
+        if decomp.gdpr_articles_hint:
+            _ = st.caption("**Wskazane artykuły RODO:** " + ", ".join(decomp.gdpr_articles_hint))
+        if decomp.uodo_act_articles_hint:
+            _ = st.caption(
+                "**Wskazane artykuły u.o.d.o.:** " + ", ".join(decomp.uodo_act_articles_hint)
+            )
+        if decomp.enriched_query != effective_query:
+            _ = st.caption(f"**Wzbogacone zapytanie:** _{decomp.enriched_query}_")
+
+
+def render_documents(res: SearchResult):
+    """Wyświetla listę dokumentów dotyczących zapytania."""
+    with st.expander(f"📋 Dokumenty ({len(res.full)})", expanded=False):
+        tabs = st.tabs(
+            [
+                f"Wszystkie ({len(res.full)})",
+                f"Decyzje UODO ({len(res.decisions)})",
+                f"Ustawa u.o.d.o. ({len(res.act_arts)})",
+                f"RODO ({len(res.gdpr_docs)})",
+                f"Graf ({len(res.graph_docs)})",
+            ]
+        )
+
+        with tabs[0]:
+            for i, doc in enumerate(res.full, 1):
+                render_card(doc)
+        with tabs[1]:
+            if res.decisions:
+                for doc in res.decisions:
+                    render_decision_card(doc)
+            else:
+                _ = st.info("Brak decyzji UODO dla tego zapytania.")
+        with tabs[2]:
+            if res.act_arts:
+                for doc in res.act_arts:
+                    render_act_article_card(doc)
+            else:
+                _ = st.info("Brak artykułów ustawy dla tego zapytania.")
+        with tabs[3]:
+            if res.gdpr_docs:
+                for doc in res.gdpr_docs:
+                    render_gdpr_card(doc)
+            else:
+                _ = st.info("Brak artykułów RODO dla tego zapytania.")
+        with tabs[4]:
+            if res.graph_docs:
+                _ = st.info("Decyzje powiązane przez cytowania z wynikami semantic search.")
+                for doc in res.graph_docs:
+                    render_decision_card(doc)
+            else:
+                _ = st.info("Brak wyników z grafu powiązań.")

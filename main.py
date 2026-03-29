@@ -14,9 +14,7 @@ import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
 from config import (
-    DEFAULT_GROQ_MODEL,
     DEFAULT_OLLAMA_MODEL,
-    OLLAMA_URL,
     RE_QUERY_SIG,
 )
 from llm import call_llm_stream, decompose_query, get_available_models
@@ -37,10 +35,9 @@ from ui import (
     PAGE_HEADER_HTML,
     UODO_CSS,
     build_context,
-    render_act_article_card,
-    render_card,
-    render_decision_card,
-    render_gdpr_card,
+    render_documents,
+    render_reasoning,
+    render_tags,
 )
 
 
@@ -77,7 +74,7 @@ def main() -> None:
     answer_placeholder = st.empty()
 
     full_answer = ""
-    _ = _render_answer(
+    _ = answer_query(
         answer_placeholder,
         history_placeholder,
         "",
@@ -88,28 +85,12 @@ def main() -> None:
     with st.sidebar:
         _ = st.markdown("## ⚙️ Opcje")
 
-        provider = st.selectbox("Provider LLM", ["Ollama", "Groq"], key="provider_select")
-
-        # Klucz API tylko dla Groq — Ollama używa OLLAMA_CLOUD_API_KEY z .env
-        if provider == "Groq":
-            api_key = st.text_input(
-                "Klucz API Groq",
-                type="password",
-                value=st.session_state.get("llm_api_key", ""),
-                key="api_key_input",
-            )
-        else:
-            api_key = ""
-            _ = st.caption(f"🖥️ Ollama: `{OLLAMA_URL}`")
-
-        models = get_available_models(provider, api_key)
-        default_model = DEFAULT_OLLAMA_MODEL if provider == "Ollama" else DEFAULT_GROQ_MODEL
+        models = get_available_models("Ollama", "")
+        default_model = DEFAULT_OLLAMA_MODEL
         default_idx = next((i for i, m in enumerate(models) if default_model in m), 0)
         selected_model = st.selectbox("Model", models, index=default_idx)
 
-        st.session_state["llm_provider"] = provider
         st.session_state["llm_model"] = selected_model
-        st.session_state["llm_api_key"] = api_key
 
         # ── Pamięć epizodyczna ───────────────────────────────────────
         memory_placeholder = st.empty()
@@ -336,7 +317,7 @@ def main() -> None:
         st.session_state["last_query"] = effective_query
         st.session_state["last_filters"] = filters
 
-        _render_answer(
+        answer_query(
             answer_placeholder,
             history_placeholder,
             kw_filter,
@@ -344,7 +325,7 @@ def main() -> None:
         )
 
 
-def _render_analysing(
+def analyse_query(
     effective_query: str,
 ) -> QueryDecomposition:
     decomp: QueryDecomposition | None = None
@@ -353,28 +334,12 @@ def _render_analysing(
         decomp = decompose_query(effective_query)
 
     if decomp and decomp.reasoning:
-        with st.expander("🧠 Reasoning Step — jak zrozumiałem pytanie", expanded=False):
-            _ = st.caption(f"**Typ zapytania:** {decomp.query_type.value}")
-            _ = st.caption(f"**Rozumowanie:** {decomp.reasoning}")
-            if decomp.search_keywords:
-                _ = st.caption(
-                    "**Słowa kluczowe:** " + " · ".join(f"`{k}`" for k in decomp.search_keywords)
-                )
-            if decomp.gdpr_articles_hint:
-                _ = st.caption(
-                    "**Wskazane artykuły RODO:** " + ", ".join(decomp.gdpr_articles_hint)
-                )
-            if decomp.uodo_act_articles_hint:
-                _ = st.caption(
-                    "**Wskazane artykuły u.o.d.o.:** " + ", ".join(decomp.uodo_act_articles_hint)
-                )
-            if decomp.enriched_query != effective_query:
-                _ = st.caption(f"**Wzbogacone zapytanie:** _{decomp.enriched_query}_")
+        render_reasoning(decomp, effective_query)
 
     return decomp
 
 
-def _render_searching(
+def search_docs(
     effective_query: str,
     search_query: str,
     kw_filter: str,
@@ -408,20 +373,7 @@ def _render_searching(
         search_time = time.time() - t0
 
         res = SearchResult.from_docs(full_docs, _tags, search_time)
-
-        _tag_info = f" · tag: `{kw_filter}`" if kw_filter.strip() else ""
-
-        if res.tags:
-            with st.expander("🏷️ Tagi", expanded=False):
-                for t in res.tags:
-                    _ = st.caption(f"`{t}`")
-
-        _ = st.caption(
-            f"""Znaleziono {len(res.full)} dokumentów 
-            ({len(res.decisions)} decyzji, {len(res.act_arts)} u.o.d.o., 
-            {len(res.gdpr_docs)} RODO, {len(res.graph_docs)} przez graf) · {res.search_time:.2f}s"""
-            + _tag_info
-        )
+        render_tags(res, kw_filter)
 
     return res
 
@@ -436,39 +388,10 @@ def _render_history(
                 with st.container(border=True, width="content"):
                     _ = st.markdown(f"#### Zapytanie: {entry.query}")
 
-                    decomp = entry.decomp
-                    with st.expander("🧠 Reasoning Step — jak zrozumiałem pytanie", expanded=False):
-                        _ = st.caption(f"**Typ zapytania:** {decomp.query_type.value}")
-                        _ = st.caption(f"**Rozumowanie:** {decomp.reasoning}")
-                        if decomp.search_keywords:
-                            _ = st.caption(
-                                "**Słowa kluczowe:** "
-                                + " · ".join(f"`{k}`" for k in decomp.search_keywords)
-                            )
-                        if decomp.gdpr_articles_hint:
-                            _ = st.caption(
-                                "**Wskazane artykuły RODO:** "
-                                + ", ".join(decomp.gdpr_articles_hint)
-                            )
-                        if decomp.uodo_act_articles_hint:
-                            _ = st.caption(
-                                "**Wskazane artykuły u.o.d.o.:** "
-                                + ", ".join(decomp.uodo_act_articles_hint)
-                            )
-                        if decomp.enriched_query:
-                            _ = st.caption(f"**Wzbogacone zapytanie:** _{decomp.enriched_query}_")
+                    render_reasoning(entry.decomp, entry.enriched_query)
 
                     res = entry.search_result
-                    if res.tags:
-                        with st.expander("🏷️ Tagi", expanded=False):
-                            for t in res.tags:
-                                _ = st.caption(f"`{t}`")
-
-                    _ = st.caption(
-                        f"""Znaleziono {len(res.full)} dokumentów 
-                        ({len(res.decisions)} decyzji, {len(res.act_arts)} u.o.d.o., 
-                        {len(res.gdpr_docs)} RODO, {len(res.graph_docs)} przez graf) · {res.search_time:.2f}s"""
-                    )
+                    render_tags(res)
 
                 with st.container(border=True):
                     _ = st.markdown("## Odpowiedź:")
@@ -480,49 +403,7 @@ def _render_history(
             pass
 
 
-def render_documents(res: SearchResult):
-    _ = st.markdown(f"### 📋 Dokumenty ({len(res.full)})")
-    tabs = st.tabs(
-        [
-            f"Wszystkie ({len(res.full)})",
-            f"Decyzje UODO ({len(res.decisions)})",
-            f"Ustawa u.o.d.o. ({len(res.act_arts)})",
-            f"RODO ({len(res.gdpr_docs)})",
-            f"Graf ({len(res.graph_docs)})",
-        ]
-    )
-
-    with tabs[0]:
-        for i, doc in enumerate(res.full, 1):
-            render_card(doc)
-    with tabs[1]:
-        if res.decisions:
-            for doc in res.decisions:
-                render_decision_card(doc)
-        else:
-            _ = st.info("Brak decyzji UODO dla tego zapytania.")
-    with tabs[2]:
-        if res.act_arts:
-            for doc in res.act_arts:
-                render_act_article_card(doc)
-        else:
-            _ = st.info("Brak artykułów ustawy dla tego zapytania.")
-    with tabs[3]:
-        if res.gdpr_docs:
-            for doc in res.gdpr_docs:
-                render_gdpr_card(doc)
-        else:
-            _ = st.info("Brak artykułów RODO dla tego zapytania.")
-    with tabs[4]:
-        if res.graph_docs:
-            _ = st.info("Decyzje powiązane przez cytowania z wynikami semantic search.")
-            for doc in res.graph_docs:
-                render_decision_card(doc)
-        else:
-            _ = st.info("Brak wyników z grafu powiązań.")
-
-
-def _render_answer(
+def answer_query(
     placeholder: DeltaGenerator,
     history_placeholder: DeltaGenerator,
     kw_filter: str,
@@ -536,7 +417,7 @@ def _render_answer(
 
         thread = None
         if thread_id is not None:
-            thread = memory.entries[thread_id]
+            thread = memory.threads[thread_id]
 
         _render_history(history_placeholder, thread)
 
@@ -545,7 +426,7 @@ def _render_answer(
             with st.container(border=True, width="content"):
                 if use_llm and len(effective_query.split()) > 3:
                     _ = st.markdown(f"#### Zapytanie: {effective_query}")
-                    decomp = _render_analysing(effective_query)
+                    decomp = analyse_query(effective_query)
 
                 search_query = decomp.enriched_query if decomp else effective_query
                 if decomp and decomp.year_from_hint and "year_from" not in filters:
@@ -553,7 +434,7 @@ def _render_answer(
                 if decomp and decomp.year_to_hint and "year_to" not in filters:
                     filters["year_to"] = decomp.year_to_hint
 
-                res = _render_searching(
+                res = search_docs(
                     effective_query,
                     search_query,
                     kw_filter,
@@ -579,6 +460,7 @@ def _render_answer(
                         _ = st.markdown("## Odpowiedź:")
                         _ = st.markdown("---")
                         _ = st.markdown(answer)
+                        render_documents(res)
 
                 if decomp:
                     entry = MemoryEntry(
@@ -593,8 +475,10 @@ def _render_answer(
                     id = memory.add(entry, thread_id)
                     st.session_state["thread_id"] = id
 
-                render_documents(res)
-
+                # FIXME:
+                # Po wygenerowaniu odpowiedzi uruchom ponownie
+                # by poprawnie odświerzyć listę wątków. Czy
+                # da się to rozwiązać inaczej?
                 st.rerun()
 
             except Exception as e:
@@ -633,7 +517,7 @@ def _render_memory(
     with placeholder.container():
         _ = st.markdown("---")
         _ = st.markdown("### 🧠 Historia sesji")
-        for i, thread in enumerate(memory.entries):
+        for i, thread in enumerate(memory.threads):
             if not thread:
                 continue
 

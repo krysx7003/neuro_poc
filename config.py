@@ -42,11 +42,9 @@ EMBED_MODEL = get_secret("EMBED_MODEL", "sdadas/mmlw-retrieval-roberta-large")
 # Modele cloud (np. "gpt-oss:120b-cloud") wymagają OLLAMA_CLOUD_API_KEY —
 # daemon przekazuje go przy pobieraniu i uruchamianiu modelu z chmury.
 # Modele czysto lokalne (np. "gemma3") działają bez klucza.
-GROQ_API_KEY = get_secret("GROQ_API_KEY", "")
 OLLAMA_CLOUD_API_KEY = get_secret("OLLAMA_CLOUD_API_KEY", "")
 OLLAMA_URL = get_secret("OLLAMA_URL", "http://localhost:11434")
 
-PROVIDERS = ["Ollama", "Groq"]
 DEFAULT_PROVIDER = "Ollama"
 DEFAULT_OLLAMA_MODEL = "mistral-large-3:675b-cloud"
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"

@@ -310,7 +310,7 @@ def get_all_tags() -> list[str]:
 def extract_tags_with_llm(query: str, available_tags: list[str]) -> list[str]:
     """Pyta LLM o tagi pasujące do zapytania (fallback gdy brak bezpośredniego trafienia).
 
-    Używa call_llm_json z llm.py — jednolite wywołanie Ollama/Groq przez jedną ścieżkę.
+    Używa call_llm_json z llm.py
     """
     # Import tutaj żeby uniknąć cyklicznych zależności (llm.py importuje z config)
     from llm import call_llm_json
