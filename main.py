@@ -460,7 +460,6 @@ def answer_query(
                         _ = st.markdown("## Odpowiedź:")
                         _ = st.markdown("---")
                         _ = st.markdown(answer)
-                        render_documents(res)
 
                 if decomp:
                     entry = MemoryEntry(
