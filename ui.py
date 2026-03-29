@@ -216,6 +216,19 @@ def build_context(
             block = TPL_GDPR.render(
                 rank=i, prefix=prefix, text=doc.get("content_text", "")
             )
+        elif dtype == "nsa_judgment":
+            sig = doc.get("signature", "?")
+            outcome = doc.get("outcome", "Brak")
+            accused = ", ".join(doc.get("accused_body", []))
+            date = doc.get("date_issued", "")
+            summary = doc.get("summary", "") or doc.get("ruling", "")
+            text = doc.get("content_text", "")
+            
+            block = (f"[NSA] {sig} | Wynik: {outcome}\n"
+                     f"Zarzut do: {accused}\n"
+                     f"Data orzeczenia: {date}\n"
+                     f"Teza/Sentencja: {summary}\n"
+                     f"Treść: {text}\n")
         else:
             keywords = doc.get("keywords_text", "") or ", ".join(
                 doc.get("keywords", [])
@@ -411,63 +424,61 @@ def render_gdpr_card(doc: dict[str, Any], rank: int) -> None:
     )
 
 def render_nsa_card(doc: dict[str, Any], rank: int) -> None:
-    """NSA card matching UODO style exactly."""
-    sig = doc.get("signature", "?")
-    year = doc.get("year", "")
-    doc_type = doc.get("doc_type", "").upper()  # WYROK/POSTANOWIENIE/UCHWAŁA
-    title = doc.get("title", "")
-    date = doc.get("date_issued", "") or doc.get("date", "")
-    court = doc.get("court", "Naczelny Sąd Administracyjny")
+    sig = doc.get("signature", "Brak sygnatury")
+    title = doc.get("title", "Orzeczenie NSA")
+    court = doc.get("court", "NSA")
+    
+    # Nowe metadane
+    date_issued = doc.get("date_issued", "Brak daty")
+    date_received = doc.get("date_received", "")
+    outcome = doc.get("outcome", "Brak informacji")
+    symbol = doc.get("symbol", "")
+    accused_body = doc.get("accused_body", [])
+    accused_str = ", ".join(accused_body) if accused_body else "Brak danych"
+    
+    # Teksty
+    summary = doc.get("summary", "")
+    ruling = doc.get("ruling", "")
+    
+    # Listy
     judges = doc.get("judges", [])
-    summary = doc.get("summary", doc.get("tezy", ""))
-    ruling = doc.get("ruling", doc.get("sentencja", ""))
+    judges_str = ", ".join(judges) if judges else "Brak danych"
     keywords = doc.get("keywords", [])
-    related_acts = doc.get("related_acts", [])
+    kw_str = ", ".join(keywords) if keywords else "Brak"
+    acts = doc.get("related_acts", [])
+    acts_str = ", ".join(acts) if acts else "Brak"
     
-    # Format date like UODO
-    date_fmt = date[:10] if date else f"{year}"
-    
-    # Judges
-    judges_str = ", ".join(judges[:3])
-    if len(judges) > 3:
-        judges_str += " ..."
-    
-    # Keywords/tags
-    kw_str = " · ".join(keywords[:6]) if keywords else "brak"
-    
-    # Acts
-    acts_str = " · ".join(related_acts[:4]) if related_acts else "brak"
-    
-    # File link
-    source_file = doc.get("source_file", "")
-    nsa_url = f"file://{source_file}" if source_file else "#"
-    
-    st.markdown(f"""
-    <article class="doc-list-item">
-      <header>
-        <a href="{nsa_url}" target="_blank">{sig}</a>
-        <time><small>NSA {date_fmt}</small></time>
-      </header>
+    html = f"""
+    <article class="p-3 mb-3 border rounded shadow-sm bg-white">
       <main>
-        <h2 class="d-flex justify-content-between align-items-start gap-2">
-          <span>{court} - {doc_type}</span>
-          <span class="status-badge status-final">NSA</span>
+        <h2 style="margin-top: 0; margin-bottom: 0.5rem;">
+          <span style="color: #0e4591; font-weight: bold; font-size: 1.15rem;">{sig}</span>
+          <span class="badge bg-secondary" style="margin-left: 0.5rem; vertical-align: middle;">Wynik #{rank}</span>
+          <span class="badge bg-info" style="margin-left: 0.5rem; vertical-align: middle; color: white;">{court}</span>
         </h2>
-        <p class="text-muted">{title[:280]}{"…" if len(title) > 280 else ""}</p>
+        <p class="text-muted mb-2">{title[:280]}{"…" if len(title) > 280 else ""}</p>
+        
+        <div class="p-2 mb-3" style="background-color: #f8f9fa; border-radius: 5px; font-size: 0.85rem; color: #3f444f;">
+          <strong>Data orzeczenia:</strong> {date_issued}
+          {f' | <strong>Data wpływu:</strong> {date_received}' if date_received else ''} <br>
+          <strong>Skarżony organ:</strong> {accused_str} <br>
+          <strong>Wynik:</strong> {outcome} 
+          {f' | <strong>Symbol:</strong> {symbol}' if symbol else ''}
+        </div>
       </main>
       
       <div class="mt-2">
         <details>
-          <summary>📝 Teza: <strong>{len(summary)} znaków</strong></summary>
-          <p>{summary[:400]}{"…" if len(summary) > 400 else ""}</p>
-        </details>
-        <details>
           <summary>⚖️ Sentencja: <strong>{len(ruling)} znaków</strong></summary>
-          <p>{ruling[:400]}{"…" if len(ruling) > 400 else ""}</p>
+          <p class="mt-2" style="font-size: 0.9rem;">{ruling[:600]}{"…" if len(ruling) > 600 else ""}</p>
+        </details>
+        <details class="mt-1">
+          <summary>📝 Teza / Uzasadnienie</summary>
+          <p class="mt-2" style="font-size: 0.9rem;">{summary[:600] if summary else doc.get("content_text", "Brak tekstu")[:600]}...</p>
         </details>
       </div>
       
-      <div class="mt-2">
+      <div class="mt-3 pt-2" style="border-top: 1px dashed #dee2e6;">
         <small class="text-muted">
           <strong>Sędziowie:</strong> {judges_str}<br>
           <strong>Hasła:</strong> {kw_str}<br>
@@ -475,12 +486,10 @@ def render_nsa_card(doc: dict[str, Any], rank: int) -> None:
         </small>
       </div>
       
-      <footer><small class="text-muted">score: {doc.get("_score", 0):.3f}</small></footer>
-    </article>""", 
-    unsafe_allow_html=True
-    )
+      <footer class="mt-1"><small class="text-muted">score: {doc.get("_score", 0):.3f}</small></footer>
+    </article>"""
     
-    st.divider()
+    st.markdown(html, unsafe_allow_html=True)
 
 def render_card(doc: dict[str, Any], rank: int) -> None:
     """Dispatcher — wybiera typ karty na podstawie doc_type."""
