@@ -102,7 +102,7 @@ def parse_court_document(text: str, filename: str) -> Dict[str, Any]:
     # 1. Filtrowanie dozwolonych kluczy
     filtered_metadata = {k: v for k, v in metadata.items() if k in ALLOWED_KEYS}
     
-    # 2. Konwersja na listy (tak jak w extract_nsa_metadata.py)
+    # 2. Konwersja na listy
     for key in LIST_KEYS:
         if key in filtered_metadata:
             raw_text = filtered_metadata[key]
@@ -113,7 +113,6 @@ def parse_court_document(text: str, filename: str) -> Dict[str, Any]:
     invalid_keys = []
     for key in ALLOWED_KEYS:
         val = filtered_metadata.get(key)
-        # Sprawdza: brak klucza, puste stringi (po strip), puste listy
         if val is None:
             invalid_keys.append(f"{key} (brak)")
         elif isinstance(val, str) and not val.strip():
@@ -155,8 +154,6 @@ def parse_court_document(text: str, filename: str) -> Dict[str, Any]:
     
     doc["content_text"] = f"Sentencja:\n{doc['ruling']}\n\nUzasadnienie:\n{doc['reasoning']}"
     return doc
-
-# (Dalsza część kodu: chunk_text, sig_to_uuid, build_embed_text, build_payload, index_nsa_batch pozostaje bez zmian strukturalnych)
 
 # ─────────────────────────── CHUNKING ───────────────────────────
 def chunk_text(text: str, max_chars: int = CHUNK_MAX_CHARS, overlap: int = CHUNK_OVERLAP_CHARS) -> List[Dict]:
@@ -254,10 +251,11 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
         print(f"🔄 Already indexed: {len(done_sigs)} NSA docs")
     
     txt_files = list(folder.glob("*.txt"))
-    print(f"📁 Found {len(txt_files)} .txt files")
+    print(f"📁 Found {len(txt_files)} .txt files\n")
     
     all_chunks = []
     skipped = 0
+    processed_files_count = 0  # Licznik poprawnych plików
 
     for txt_file in sorted(txt_files):
         try:
@@ -268,6 +266,10 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
                 print(f"  [POMINIĘTO] {txt_file.name} -> Brakuje treści w: {', '.join(raw_doc['_missing'])}")
                 skipped += 1
                 continue
+
+            # Jeśli dokument przeszedł weryfikację
+            print(f"  [OK] {txt_file.name}")
+            processed_files_count += 1
 
             chunks = chunk_text(raw_doc["content_text"])
             for chunk_info in chunks:
@@ -280,10 +282,10 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
             skipped += 1
     
     if not all_chunks:
-        print(f"✅ Brak nowych dokumentów do indeksowania (Pominięto {skipped}).")
+        print(f"\n✅ Brak nowych danych. Przetworzono poprawnie {processed_files_count} plików.")
         return
 
-    print(f"📝 Indeksowanie {len(all_chunks)} chunków...")
+    print(f"\n📝 Indeksowanie {len(all_chunks)} chunków pochodzących z {processed_files_count} plików...")
     texts = [build_embed_text(c) for c in all_chunks]
     vectors = model.encode(texts, normalize_embeddings=True, batch_size=BATCH_SIZE).tolist()
     
@@ -299,7 +301,15 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
         client.upsert(collection_name=COLLECTION_NAME, points=points)
         print(f"✅ +{len(points)} ({(i+len(points))/len(all_chunks)*100:.0f}%)")
     
-    print(f"\n🎉 Gotowe. Pominięto {skipped} plików.")
+    # Tabela podsumowująca
+    print(f"\n" + "="*50)
+    print(f"🎉 PODSUMOWANIE INDEKSOWANIA")
+    print(f"="*50)
+    print(f"Wszystkich plików w folderze: {len(txt_files)}")
+    print(f"✅ Plików zapisanych w bazie:  {processed_files_count}")
+    print(f"❌ Plików odrzuconych:         {skipped}")
+    print(f"📦 Łączna liczba chunków:      {len(all_chunks)}")
+    print(f"="*50)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Batch index NSA judgments")
@@ -308,4 +318,5 @@ if __name__ == "__main__":
     parser.add_argument("--rebuild", action="store_true")
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
+    
     index_nsa_batch(args.folder, args.qdrant, args.rebuild, args.device)
