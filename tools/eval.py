@@ -1,6 +1,6 @@
 """eval.py — Automatyczna ewaluacja systemu UODO RAG.
 
-Wzorzec z kursu Software 3.0 (lekcja 5.2–5.3): binarny leaderboard
+Wzorzec z kursu Software 3.0: binarny leaderboard
 zamiast subiektywnych ocen 1–10. Każdy test zwraca 0 lub 1.
 
 Uruchomienie:
@@ -9,7 +9,7 @@ Uruchomienie:
     python eval.py --verbose           # z pełnymi odpowiedziami
 
 Wymagania:
-    pip install qdrant-client sentence-transformers groq requests python-dotenv
+    pip install qdrant-client sentence-transformers requests python-dotenv
 """
 
 import argparse
@@ -19,30 +19,26 @@ import sys
 import time
 from typing import Any
 
-from config import COLLECTION_NAME, EMBED_MODEL, QDRANT_API_KEY, QDRANT_URL
+from config import COLLECTION_NAME, EMBED_MODEL
 
 # ─────────────────────────── KONFIGURACJA ────────────────────────
 
 try:
     from dotenv import load_dotenv
-
     load_dotenv()
 except ImportError:
     pass
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
+# Pobieranie zmiennych z tolerancją na małe/wielkie litery w .env
+OLLAMA_API_KEY = os.getenv("ollama_cloud_api_key", os.getenv("OLLAMA_CLOUD_API_KEY", ""))
+OLLAMA_URL = os.getenv("ollama_url", os.getenv("OLLAMA_URL", "http://localhost:11434"))
+QDRANT_URL = os.getenv("qdrant_url", os.getenv("QDRANT_URL", "http://localhost:6333"))
+QDRANT_API_KEY = os.getenv("qdrant_api_key", os.getenv("QDRANT_API_KEY", ""))
+
+
+DEFAULT_MODEL = "gpt-oss:120b-cloud" 
 
 # ─────────────────────────── ZŁOTE PYTANIA ────────────────────────
-# 10 pytań ze zdefiniowanymi kryteriami sukcesu.
-# Każde kryterium to binarne sprawdzenie (0/1) na odpowiedzi LLM.
-#
-# Format każdego testu:
-#   question:    pytanie użytkownika
-#   description: co sprawdzamy
-#   checks:      lista funkcji lambda(answer: str) -> bool
-#   check_names: nazwy sprawdzeń (1:1 z checks)
-
 GOLDEN_QUESTIONS: list[dict[str, Any]] = [
     {
         "id": "GQ-001",
@@ -220,12 +216,9 @@ GOLDEN_QUESTIONS: list[dict[str, Any]] = [
 
 # ─────────────────────────── FUNKCJE POMOCNICZE ──────────────────
 
-
 def get_embedder():
     from sentence_transformers import SentenceTransformer
-
     return SentenceTransformer(EMBED_MODEL)
-
 
 def semantic_search(query: str, top_k: int = 8) -> list[dict[str, Any]]:
     from qdrant_client import QdrantClient
@@ -244,20 +237,21 @@ def semantic_search(query: str, top_k: int = 8) -> list[dict[str, Any]]:
             )
         ]
     )
-    results = client.search(
+    # ZAKTUALIZOWANE WYWOŁANIE DLA QDRANT
+    results = client.query_points(
         collection_name=COLLECTION_NAME,
-        query_vector=vec,
+        query=vec,
         limit=top_k,
         query_filter=qdrant_filter,
         with_payload=True,
-    )
+    ).points
+    
     docs = []
     for r in results:
         d = dict(r.payload or {})
         d["_score"] = r.score
         docs.append(d)
     return docs
-
 
 def build_simple_context(docs: list[dict[str, Any]], query: str, max_chars: int = 10000) -> str:
     parts = [f"Pytanie: {query}\n\nDokumenty:\n"]
@@ -282,35 +276,45 @@ def build_simple_context(docs: list[dict[str, Any]], query: str, max_chars: int 
         chars += len(block)
     return "\n---\n".join(parts)
 
-
 def call_llm(query: str, context: str) -> str:
-    """Wywołuje LLM i zwraca pełną odpowiedź (bez streamowania)."""
-    from groq import Groq
+    """Wywołuje LLM przez API zgodne z Ollama i zwraca pełną odpowiedź."""
+    import requests
 
-    client = Groq(api_key=GROQ_API_KEY)
     system = (
         "Jesteś ekspertem prawa ochrony danych osobowych. "
         "Odpowiadaj WYŁĄCZNIE na podstawie podanych dokumentów. "
         "Cytuj sygnatury decyzji i numery artykułów. "
         "Odpowiadaj po polsku."
     )
-    resp = client.chat.completions.create(  # type: ignore[call-overload]
-        model=DEFAULT_MODEL,
-        messages=[  # type: ignore[arg-type]
+    
+    headers = {"Content-Type": "application/json"}
+    if OLLAMA_API_KEY:
+        headers["Authorization"] = f"Bearer {OLLAMA_API_KEY}"
+
+    payload = {
+        "model": DEFAULT_MODEL,
+        "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": f"Pytanie: {query}\n\nDokumenty:\n{context}"},
         ],
-        max_tokens=1024,
-        temperature=0.0,
-    )
-    return resp.choices[0].message.content or ""
+        "stream": False,
+        "options": {
+            "temperature": 0.0
+        }
+    }
 
+    try:
+        response = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, headers=headers)
+        response.raise_for_status()
+        return response.json().get("message", {}).get("content", "")
+    except Exception as e:
+        print(f"\n  ❌ BŁĄD OLLAMY: Nie udało się połączyć pod adresem {OLLAMA_URL}")
+        print(f"  Szczegóły: {e}")
+        return ""
 
 # ─────────────────────────── RUNNER ──────────────────────────────
 
-
 def run_single(gq: dict[str, Any], verbose: bool = False) -> dict[str, Any]:
-    """Uruchamia jeden test i zwraca wyniki."""
     print(f"\n{'=' * 60}")
     print(f"  {gq['id']}: {gq['question']}")
     print(f"  {gq['description']}")
@@ -360,7 +364,6 @@ def run_single(gq: dict[str, Any], verbose: bool = False) -> dict[str, Any]:
         "elapsed_s": round(elapsed, 1),
     }
 
-
 def run_all(question_idx: int | None = None, verbose: bool = False) -> None:
     questions = GOLDEN_QUESTIONS
     if question_idx is not None:
@@ -374,6 +377,7 @@ def run_all(question_idx: int | None = None, verbose: bool = False) -> None:
     print(f"  UODO RAG — Ewaluacja ({len(questions)} pytań)")
     print(f"  Model: {DEFAULT_MODEL}")
     print(f"  Qdrant: {QDRANT_URL}/{COLLECTION_NAME}")
+    print(f"  LLM Endpoint: {OLLAMA_URL}")
     print(f"{'#' * 60}")
 
     all_results = []
@@ -425,7 +429,6 @@ def run_all(question_idx: int | None = None, verbose: bool = False) -> None:
         )
     print(f"\n  Wyniki zapisane: {output_path}")
 
-
 # ─────────────────────────── MAIN ────────────────────────────────
 
 if __name__ == "__main__":
@@ -433,9 +436,5 @@ if __name__ == "__main__":
     parser.add_argument("--question", type=int, default=None, help="Numer pytania (1–10)")
     parser.add_argument("--verbose", action="store_true", help="Wyświetl pełne odpowiedzi")
     args = parser.parse_args()
-
-    if not GROQ_API_KEY:
-        print("❌ Brak GROQ_API_KEY — ustaw w .env lub zmiennej środowiskowej")
-        sys.exit(1)
 
     run_all(question_idx=args.question, verbose=args.verbose)
