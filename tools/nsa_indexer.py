@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
 """
-NSA Batch Indexer — processes all *.txt files in folder → Qdrant uodo_decisions
-
-Usage:
-python nsa_batch_indexer.py --folder ./NSAreferencje/
-python nsa_batch_indexer.py --folder ./NSAreferencje/ --rebuild
-python nsa_batch_indexer.py --folder ./NSAreferencje/ --qdrant http://localhost:6333
-
-Compatible with uodo_indexer.py schema. Adds doc_type="nsa_judgment"
+NSA Batch Indexer + Strict Metadata Extractor
+Procesuje pliki *.txt -> rygorystycznie filtruje metadane -> Qdrant uodo_decisions
 """
 import argparse
 import hashlib
@@ -15,7 +9,6 @@ import json
 import os
 import re
 import sys
-import time
 import uuid
 from pathlib import Path
 from typing import Dict, List, Any
@@ -41,90 +34,117 @@ BATCH_SIZE = 32
 CHUNK_MAX_CHARS = 4000
 CHUNK_OVERLAP_CHARS = 300
 
-# ─────────────────────────── PARSER ─────────────────────────────
-def parse_nsa_judgment(text: str, filename: str) -> Dict[str, Any]:
-    """Extracts structured data from NSA judgment text."""
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+# ─────────────────────────── STRICT METADATA PARSER ────────────────
+ALLOWED_KEYS = [
+    'Tytuł', 'Data orzeczenia', 'Sąd', 'Sędziowie', 'Sentencja', 
+    'Symbol z opisem', 'Data wpływu', 'Treść wyniku', 'Uzasadnienie', 
+    'Skarżony organ', 'Powołane przepisy', 'Hasła tematyczne'
+]
+
+LIST_KEYS = [
+    'Sędziowie', 'Skarżony organ', 'Powołane przepisy', 'Hasła tematyczne'
+]
+
+def parse_court_document(text: str, filename: str) -> Dict[str, Any]:
+    """Ekstrahuje metadane i mapuje je na schemat wymagany przez Qdrant."""
+    lines = text.split('\n')
+    metadata = {}
+    current_key = None
+    current_value = []
+    
+    known_text_blocks = ['Sentencja', 'Uzasadnienie', 'Teza', 'Wskazówki']
+    title_captured = False
+
+    for line in lines:
+        line_stripped = line.strip()
+        
+        if not line_stripped and current_key is None:
+            continue
+
+        if not title_captured and '|' not in line and line_stripped not in known_text_blocks:
+            metadata['Tytuł'] = line_stripped
+            title_captured = True
+            continue
+
+        if line_stripped in known_text_blocks:
+            if current_key:
+                metadata[current_key] = '\n'.join(current_value).strip().rstrip('|')
+            current_key = line_stripped
+            current_value = []
+            continue
+
+        if '|' in line and current_key not in known_text_blocks:
+            if current_key:
+                metadata[current_key] = '\n'.join(current_value).strip().rstrip('|')
+            
+            parts = line.split('|', 1)
+            current_key = parts[0].strip()
+            val = parts[1].strip()
+            current_value = [val]
+            
+            if val.endswith('|'):
+                metadata[current_key] = val[:-1].strip()
+                current_key = None
+                current_value = []
+        else:
+            if current_key:
+                if line_stripped.endswith('|') and current_key not in known_text_blocks:
+                    current_value.append(line_stripped[:-1].strip())
+                    metadata[current_key] = '\n'.join(current_value).strip()
+                    current_key = None
+                    current_value = []
+                else:
+                    current_value.append(line_stripped)
+
+    if current_key:
+        metadata[current_key] = '\n'.join(current_value).strip().rstrip('|')
+
+    # Filtrowanie i formatowanie list
+    filtered_metadata = {k: v for k, v in metadata.items() if k in ALLOWED_KEYS}
+    
+    # Sprawdzenie brakujących kluczy (STRICT MODE)
+    missing_keys = [key for key in ALLOWED_KEYS if key not in filtered_metadata]
+    if missing_keys:
+        return {"_error": "missing_keys", "_missing": missing_keys}
+
+    for key in LIST_KEYS:
+        if key in filtered_metadata:
+            raw_text = filtered_metadata[key]
+            filtered_metadata[key] = [item.strip() for item in raw_text.split('\n') if item.strip()]
+
+    # Mapowanie na schemat Qdrant / Indexera
+    title_full = filtered_metadata['Tytuł']
+    sig_match = re.match(r"^(.+?)(?:\s+-\s+(.+))?$", title_full)
+    signature = sig_match.group(1).strip() if sig_match else title_full
+    doc_title = sig_match.group(2).strip() if sig_match and sig_match.group(2) else "Wyrok"
+
+    # Wyciąganie roku z daty (np. 2013-02-20)
+    year = int(filtered_metadata['Data orzeczenia'].split('-')[0]) if '-' in filtered_metadata['Data orzeczenia'] else 0
+
     doc = {
         "doc_type": "nsa_judgment",
         "source_collection": "NSA",
         "source_file": filename,
-        "signature": "",
-        "title": "",
-        "court": "",
-        "judges": [],
-        "year": 0,
-        "date_issued": "",
-        "content_text": "",
-        "summary": "",  # Tezy
-        "ruling": "",   # Sentencja
-        "reasoning": "", # Uzasadnienie
-        "related_acts": [],
-        "keywords": [],
+        "signature": signature,
+        "title": doc_title,
+        "court": filtered_metadata['Sąd'],
+        "judges": filtered_metadata['Sędziowie'],
+        "year": year,
+        "date_issued": filtered_metadata['Data orzeczenia'],
+        "ruling": filtered_metadata['Sentencja'],
+        "reasoning": filtered_metadata['Uzasadnienie'],
+        "related_acts": filtered_metadata['Powołane przepisy'],
+        "keywords": filtered_metadata['Hasła tematyczne'],
+        # Dodatkowe pola z Twojego zbioru, których wcześniej nie było w indexerze:
+        "symbol": filtered_metadata['Symbol z opisem'],
+        "date_received": filtered_metadata['Data wpływu'],
+        "outcome": filtered_metadata['Treść wyniku'],
+        "accused_body": filtered_metadata['Skarżony organ'],
+        "summary": metadata.get('Teza', '') # Opcjonalne
     }
     
-    # 1. FIRST LINE ONLY: "$Signature$ - Wyrok"
-    first_line = lines[0] if lines else ""
-    match = re.match(r"^(.+?)(?:\s+-\s+(.+))?$", first_line.strip())
-    if match:
-        doc["signature"] = match.group(1).strip()
-        doc["title"] = match.group(2).strip() if match.group(2) else "Wyrok"
-        print(f"  ✅ Found: '{doc['signature']}' - {doc['title']}")
-
-    # Fallback: filename if first line fails  
-    if not doc["signature"]:
-        sig_from_filename = re.search(r"([IVX]+ ?[A-ZŁ]{2,} ?\d+[-/]\d{2,4}[A-ZP]?)", filename)
-        if sig_from_filename:
-            doc["signature"] = sig_from_filename.group(1).strip()
-            print(f"  ✅ Fallback: '{doc['signature']}' ({filename})")
-    
-    # 2. METADATA TABLE (Data orzeczenia|1997-09-22|)
-    table_start = next((i for i, line in enumerate(lines) if "Data orzeczenia" in line), None)
-    if table_start:
-        for i in range(table_start, min(table_start + 15, len(lines))):
-            line = lines[i]
-            if "|" in line and len(line.split("|")) >= 3:
-                parts = [p.strip() for p in line.split("|")]
-                key, value = parts[1], parts[2]
-                
-                if key == "Data orzeczenia" and value:
-                    doc["date_issued"] = value
-                    doc["year"] = int(value.split("-")[0]) if "-" in value else 0
-                elif key == "Sąd":
-                    doc["court"] = value
-                elif key == "Sędziowie":
-                    doc["judges"] = [j.strip().rstrip("/").strip() for j in value.split("\n") if "/" in j or j.strip()]
-    
-    # 3. SECTIONS: Tezy|Sentencja|Uzasadnienie
-    sections = {"tezy": "", "sentencja": "", "uzasadnienie": ""}
-    current_section = None
-    
-    for line in lines:
-        if line.startswith("Tezy"):
-            current_section = "tezy"
-        elif line.startswith("Sentencja"):
-            current_section = "sentencja"
-        elif line.startswith("Uzasadnienie"):
-            current_section = "uzasadnienie"
-        elif current_section and line:
-            sections[current_section] += line + "\n"
-    
-    doc["summary"] = sections["tezy"].strip()
-    doc["ruling"] = sections["sentencja"].strip()
-    doc["reasoning"] = sections["uzasadnienie"].strip()
-    
-    # Full content
-    doc["content_text"] = "\n\n### ".join([
-        f"Tezy: {sections['tezy']}",
-        f"Sentencja: {sections['sentencja']}",
-        f"Uzasadnienie: {sections['uzasadnienie']}"
-    ]).strip()
-    
-    # 4. REFERENCES (Powołane przepisy|...)
-    refs_match = re.search(r"Powołane przepisy\|(.*?)(?=\n[A-Z]{3}|$)", text, re.DOTALL | re.IGNORECASE)
-    if refs_match:
-        acts_text = refs_match.group(1)
-        doc["related_acts"] = [act.strip() for act in re.split(r"[.;]", acts_text) if act.strip()]
+    # Pełen tekst do chunkowania (wektoryzacji)
+    doc["content_text"] = f"Sentencja:\n{doc['ruling']}\n\nUzasadnienie:\n{doc['reasoning']}"
     
     return doc
 
@@ -134,7 +154,6 @@ def chunk_text(text: str, max_chars: int = CHUNK_MAX_CHARS, overlap: int = CHUNK
     if len(text) <= max_chars:
         return [{"chunk_text": text, "chunk_index": 0, "chunk_total": 1}]
     
-    # Split by paragraphs/sections
     paras = re.split(r"\n\n+", text)
     chunks = []
     current = ""
@@ -183,9 +202,12 @@ def build_payload(raw_doc: Dict, chunk_info: Dict) -> Dict[str, Any]:
         "ruling": raw_doc.get("ruling", ""),
         "source_file": raw_doc.get("source_file", ""),
         "related_acts": raw_doc.get("related_acts", []),
-        "keywords": [],
-        "keywords_text": "",
-        # Compatible empty fields
+        "keywords": raw_doc.get("keywords", []),
+        "keywords_text": ", ".join(raw_doc.get("keywords", [])),
+        "symbol": raw_doc.get("symbol", ""),
+        "date_received": raw_doc.get("date_received", ""),
+        "outcome": raw_doc.get("outcome", ""),
+        "accused_body": raw_doc.get("accused_body", []),
         "status": "opublikowane",
         "related_eu_acts": [],
         "related_uodo_rulings": [],
@@ -200,16 +222,13 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
         print(f"❌ Folder not found: {folder}")
         return
     
-    # Load embedder
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     print(f"🤖 Loading {EMBED_MODEL} on {device}")
     model = SentenceTransformer(EMBED_MODEL, device=device, trust_remote_code=True)
     dim = model.get_sentence_embedding_dimension()
     
-    # Qdrant client
     client = QdrantClient(url=qdrant_url, timeout=60)
     
-    # Create/update collection (same as uodo_indexer)
     existing = {c.name for c in client.get_collections().collections}
     if COLLECTION_NAME not in existing:
         print(f"📦 Creating {COLLECTION_NAME}")
@@ -226,7 +245,6 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
         ]:
             client.create_payload_index(COLLECTION_NAME, field, schema)
     
-    # Get already indexed NSA docs
     done_sigs = set()
     if not rebuild:
         offset = None
@@ -247,18 +265,25 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
             offset = next_off
         print(f"🔄 Already indexed: {len(done_sigs)} NSA docs")
     
-    # Process all .txt files
     txt_files = list(folder.glob("*.txt"))
     print(f"📁 Found {len(txt_files)} .txt files")
     
     all_chunks = []
+    skipped = 0
+
     for txt_file in sorted(txt_files):
-        print(f"📄 Processing {txt_file.name}...")
         text = txt_file.read_text(encoding="utf-8")
-        raw_doc = parse_nsa_judgment(text, txt_file.name)
+        raw_doc = parse_court_document(text, txt_file.name)
         
+        # Filtrowanie rygorystyczne - odrzucamy niekompletne
+        if "_error" in raw_doc:
+            print(f"  ⚠️ Skipped {txt_file.name} - Brakuje kluczy: {', '.join(raw_doc['_missing'])}")
+            skipped += 1
+            continue
+
         if not raw_doc.get("signature"):
-            print(f"  ⚠️ Skipped - no signature")
+            print(f"  ⚠️ Skipped {txt_file.name} - Brak sygnatury")
+            skipped += 1
             continue
         
         chunks = chunk_text(raw_doc["content_text"])
@@ -268,12 +293,11 @@ def index_nsa_batch(folder_path: str, qdrant_url: str, rebuild: bool = False, de
                 chunk_info.update(raw_doc)
                 all_chunks.append(chunk_info)
     
-    print(f"📝 {len(all_chunks)} new chunks to index")
+    print(f"📝 {len(all_chunks)} new chunks to index (Skipped {skipped} incomplete files)")
     if not all_chunks:
         print("✅ All done!")
         return
     
-    # Batch embedding + upsert
     indexed, errors = 0, 0
     texts = [build_embed_text(c) for c in all_chunks]
     vectors = model.encode(texts, normalize_embeddings=True, batch_size=BATCH_SIZE).tolist()
