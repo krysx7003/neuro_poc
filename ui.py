@@ -217,9 +217,12 @@ def build_context(
 
 
 # ─────────────────────────── KARTY WYNIKÓW ───────────────────────
-
-
 def decision_url(doc: dict[str, Any]) -> str:
+    """Tworzy adres url decyzji.
+
+    1. Jeżeli dokument ma pole 'source_url' zwraca jego zawartość
+    2. Jeżeli brakuje tego pola url generowany jest na podstawie sygnatury
+    """
     sig = doc.get("signature", "")
     url = doc.get("source_url", "")
     if url:
@@ -233,6 +236,7 @@ def decision_url(doc: dict[str, Any]) -> str:
 
 
 def render_decision_card(doc: dict[str, Any]) -> None:
+    """Wyświetla dane dokumentu typu decyzja."""
     sig = doc.get("signature", "?")
     status = doc.get("status", "")
     date = doc.get("date_published", "") or doc.get("date_issued", "")
@@ -320,6 +324,7 @@ def render_decision_card(doc: dict[str, Any]) -> None:
 
 
 def render_act_article_card(doc: dict[str, Any]) -> None:
+    """Wyświetla dane dokumentu typu artykuł."""
     art_num = doc.get("article_num", "?")
     chunk_idx = doc.get("chunk_index", 0)
     total = doc.get("chunk_total", 1)
@@ -347,6 +352,7 @@ def render_act_article_card(doc: dict[str, Any]) -> None:
 
 
 def render_gdpr_card(doc: dict[str, Any]) -> None:
+    """Wyświetla dane dokumentu typu GDPR."""
     art_num = doc.get("article_num", "?")
     chunk_idx = doc.get("chunk_index", 0)
     total = doc.get("chunk_total", 1)
@@ -395,6 +401,7 @@ def render_card(doc: dict[str, Any]) -> None:
 
 
 def render_tags(res: SearchResult, kw_filter: str | None = None):
+    """Wyświetla podsumowanie wyników wyszukiwania dokumentów."""
     _tag_info: str | None = None
     if kw_filter:
         _tag_info = f" · tag: `{kw_filter}`" if kw_filter.strip() else ""
@@ -416,6 +423,7 @@ def render_tags(res: SearchResult, kw_filter: str | None = None):
 
 
 def render_reasoning(decomp: QueryDecomposition, effective_query: str):
+    """Wyświetla dekomopzycje zapytania."""
     with st.expander("🧠 Reasoning Step — jak zrozumiałem pytanie", expanded=False):
         _ = st.caption(f"**Typ zapytania:** {decomp.query_type.value}")
         _ = st.caption(f"**Rozumowanie:** {decomp.reasoning}")
@@ -434,6 +442,7 @@ def render_reasoning(decomp: QueryDecomposition, effective_query: str):
 
 
 def render_documents(res: SearchResult):
+    """Wyświetla listę dokumentów dotyczących zapytania."""
     with st.expander(f"📋 Dokumenty ({len(res.full)})", expanded=False):
         tabs = st.tabs(
             [

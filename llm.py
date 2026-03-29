@@ -71,7 +71,6 @@ def _get_llm_params(model: str | None, api_key: str | None) -> tuple[str, str]:
 def call_llm_stream(
     query: str,
     context: str,
-    provider: str | None = None,
     model: str | None = None,
     api_key: str | None = None,
 ) -> Generator[str, Any, None]:
@@ -113,7 +112,6 @@ def call_llm_stream(
 
 def call_llm_json(
     prompt: str,
-    provider: str | None = None,
     model: str | None = None,
     api_key: str | None = None,
 ) -> dict[str, Any]:
@@ -163,7 +161,6 @@ def call_llm_json(
 
 def decompose_query(
     query: str,
-    provider: str | None = None,
     model: str | None = None,
     api_key: str | None = None,
 ) -> QueryDecomposition:
@@ -201,7 +198,7 @@ def decompose_query(
     - year_from_hint/year_to_hint: podaj rok tylko jeśli pytanie wyraźnie sugeruje okres
     - artykuły: podaj tylko jeśli jesteś pewien, że są istotne dla pytania"""
 
-    raw = call_llm_json(prompt, provider=provider, model=model, api_key=api_key)
+    raw = call_llm_json(prompt, model=model, api_key=api_key)
     if not raw or "enriched_query" not in raw:
         return QueryDecomposition(
             original_query=query,
