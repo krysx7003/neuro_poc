@@ -3,6 +3,7 @@ Interfejs użytkownika — karty wyników, budowanie kontekstu LLM, CSS.
 """
 
 import re
+import textwrap
 from typing import Any
 
 import streamlit as st
@@ -423,73 +424,100 @@ def render_gdpr_card(doc: dict[str, Any], rank: int) -> None:
         unsafe_allow_html=True,
     )
 
+import re
+from typing import Any
+import streamlit as st
+
 def render_nsa_card(doc: dict[str, Any], rank: int) -> None:
-    sig = doc.get("signature", "Brak sygnatury")
-    title = doc.get("title", "Orzeczenie NSA")
-    court = doc.get("court", "NSA")
+    # Pobieranie głównych metadanych po polskojęzycznych kluczach
+    sig = doc.get("Tytuł", doc.get("signature", "Brak sygnatury"))
+    court = doc.get("Sąd", "NSA")
     
-    # Nowe metadane
-    date_issued = doc.get("date_issued", "Brak daty")
-    date_received = doc.get("date_received", "")
-    outcome = doc.get("outcome", "Brak informacji")
-    symbol = doc.get("symbol", "")
-    accused_body = doc.get("accused_body", [])
-    accused_str = ", ".join(accused_body) if accused_body else "Brak danych"
+    # Podtytuł (np. symbol z opisem)
+    symbol = doc.get("Symbol z opisem", "")
+    
+    # Daty i wyniki
+    date_issued = doc.get("Data orzeczenia", "Brak daty")
+    date_received = doc.get("Data wpływu", "")
+    outcome = doc.get("Treść wyniku", "Brak informacji")
+    
+    # Skarżony organ (może być listą lub stringiem)
+    accused_body = doc.get("Skarżony organ", [])
+    if isinstance(accused_body, list):
+        accused_str = ", ".join(accused_body) if accused_body else "Brak danych"
+    else:
+        accused_str = str(accused_body)
     
     # Teksty
-    summary = doc.get("summary", "")
-    ruling = doc.get("ruling", "")
+    summary = doc.get("Uzasadnienie", "")
+    ruling = doc.get("Sentencja", "")
     
-    # Listy
-    judges = doc.get("judges", [])
-    judges_str = ", ".join(judges) if judges else "Brak danych"
-    keywords = doc.get("keywords", [])
-    kw_str = ", ".join(keywords) if keywords else "Brak"
-    acts = doc.get("related_acts", [])
-    acts_str = ", ".join(acts) if acts else "Brak"
-    
-    html = f"""
-    <article class="p-3 mb-3 border rounded shadow-sm bg-white">
-      <main>
-        <h2 style="margin-top: 0; margin-bottom: 0.5rem;">
-          <span style="color: #0e4591; font-weight: bold; font-size: 1.15rem;">{sig}</span>
-          <span class="badge bg-secondary" style="margin-left: 0.5rem; vertical-align: middle;">Wynik #{rank}</span>
-          <span class="badge bg-info" style="margin-left: 0.5rem; vertical-align: middle; color: white;">{court}</span>
-        </h2>
-        <p class="text-muted mb-2">{title[:280]}{"…" if len(title) > 280 else ""}</p>
+    # Listy: Sędziowie, Hasła, Przepisy
+    judges = doc.get("Sędziowie", [])
+    if isinstance(judges, list):
+        judges_str = ", ".join(judges) if judges else "Brak danych"
+    else:
+        judges_str = str(judges)
         
-        <div class="p-2 mb-3" style="background-color: #f8f9fa; border-radius: 5px; font-size: 0.85rem; color: #3f444f;">
-          <strong>Data orzeczenia:</strong> {date_issued}
-          {f' | <strong>Data wpływu:</strong> {date_received}' if date_received else ''} <br>
-          <strong>Skarżony organ:</strong> {accused_str} <br>
-          <strong>Wynik:</strong> {outcome} 
-          {f' | <strong>Symbol:</strong> {symbol}' if symbol else ''}
-        </div>
-      </main>
-      
-      <div class="mt-2">
-        <details>
-          <summary>⚖️ Sentencja: <strong>{len(ruling)} znaków</strong></summary>
-          <p class="mt-2" style="font-size: 0.9rem;">{ruling[:600]}{"…" if len(ruling) > 600 else ""}</p>
-        </details>
-        <details class="mt-1">
-          <summary>📝 Teza / Uzasadnienie</summary>
-          <p class="mt-2" style="font-size: 0.9rem;">{summary[:600] if summary else doc.get("content_text", "Brak tekstu")[:600]}...</p>
-        </details>
-      </div>
-      
-      <div class="mt-3 pt-2" style="border-top: 1px dashed #dee2e6;">
-        <small class="text-muted">
-          <strong>Sędziowie:</strong> {judges_str}<br>
-          <strong>Hasła:</strong> {kw_str}<br>
-          <strong>Przepisy:</strong> {acts_str}
-        </small>
-      </div>
-      
-      <footer class="mt-1"><small class="text-muted">score: {doc.get("_score", 0):.3f}</small></footer>
-    </article>"""
+    keywords = doc.get("Hasła tematyczne", [])
+    if isinstance(keywords, list):
+        kw_str = ", ".join(keywords) if keywords else "Brak"
+    else:
+        kw_str = str(keywords)
+        
+    acts = doc.get("Powołane przepisy", [])
+    if isinstance(acts, list):
+        acts_str = ", ".join(acts) if acts else "Brak"
+    else:
+        acts_str = str(acts)
     
-    st.markdown(html, unsafe_allow_html=True)
+    # Budowanie kodu HTML z ładnymi wcięciami w Pythonie
+    raw_html = f"""
+        <article class="p-3 mb-3 border rounded shadow-sm bg-white">
+          <main>
+            <h2 style="margin-top: 0; margin-bottom: 0.5rem;">
+              <span style="color: #0e4591; font-weight: bold; font-size: 1.15rem;">{sig}</span>
+              <span class="badge bg-secondary" style="margin-left: 0.5rem; vertical-align: middle;">Wynik #{rank}</span>
+              <span class="badge bg-info" style="margin-left: 0.5rem; vertical-align: middle; color: white;">{court}</span>
+            </h2>
+            <p class="text-muted mb-2">{symbol}</p>
+            
+            <div class="p-2 mb-3" style="background-color: #f8f9fa; border-radius: 5px; font-size: 0.85rem; color: #3f444f;">
+              <strong>Data orzeczenia:</strong> {date_issued}
+              {f' | <strong>Data wpływu:</strong> {date_received}' if date_received else ''} <br>
+              <strong>Skarżony organ:</strong> {accused_str} <br>
+              <strong>Wynik:</strong> {outcome} 
+            </div>
+          </main>
+          
+          <div class="mt-2">
+            <details>
+              <summary>⚖️ Sentencja: <strong>{len(ruling)} znaków</strong></summary>
+              <p class="mt-2" style="font-size: 0.9rem;">{ruling[:600]}{"…" if len(ruling) > 600 else ""}</p>
+            </details>
+            <details class="mt-1">
+              <summary>📝 Uzasadnienie</summary>
+              <p class="mt-2" style="font-size: 0.9rem;">{summary[:600] if summary else doc.get("content_text", "Brak tekstu")[:600]}...</p>
+            </details>
+          </div>
+          
+          <div class="mt-3 pt-2" style="border-top: 1px dashed #dee2e6;">
+            <small class="text-muted">
+              <strong>Sędziowie:</strong> {judges_str}<br>
+              <strong>Hasła:</strong> {kw_str}<br>
+              <strong>Przepisy:</strong> {acts_str}
+            </small>
+          </div>
+          
+          <footer class="mt-1"><small class="text-muted">score: {doc.get("_score", 0):.3f}</small></footer>
+        </article>
+    """
+    
+    # 🔴 KLUCZOWA ZMIANA: Usunięcie WSZYSTKICH spacji i tabulacji na początku każdej linii.
+    # Zapobiega to traktowaniu zagnieżdżonych divów przez Streamlit jako bloki kodu (```).
+    clean_html = re.sub(r"^[ \t]+", "", raw_html, flags=re.MULTILINE)
+    
+    st.markdown(clean_html, unsafe_allow_html=True)
 
 def render_card(doc: dict[str, Any], rank: int) -> None:
     """Dispatcher — wybiera typ karty na podstawie doc_type."""
