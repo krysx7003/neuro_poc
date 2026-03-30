@@ -1,7 +1,6 @@
 """Interfejs użytkownika — karty wyników, budowanie kontekstu LLM, CSS."""
 
 import re
-import textwrap
 from typing import Any
 
 import streamlit as st
@@ -193,9 +192,7 @@ def build_context(
         elif dtype in ("gdpr_article", "gdpr_recital"):
             art_num = doc.get("article_num", "?")
             prefix = "Motyw" if dtype == "gdpr_recital" else f"Art. {art_num}"
-            block = TPL_GDPR.render(
-                rank=i, prefix=prefix, text=doc.get("content_text", "")
-            )
+            block = TPL_GDPR.render(rank=i, prefix=prefix, text=doc.get("content_text", ""))
         elif dtype == "nsa_judgment":
             sig = doc.get("signature", "?")
             outcome = doc.get("outcome", "Brak")
@@ -203,12 +200,14 @@ def build_context(
             date = doc.get("date_issued", "")
             summary = doc.get("summary", "") or doc.get("ruling", "")
             text = doc.get("content_text", "")
-            
-            block = (f"[NSA] {sig} | Wynik: {outcome}\n"
-                     f"Zarzut do: {accused}\n"
-                     f"Data orzeczenia: {date}\n"
-                     f"Teza/Sentencja: {summary}\n"
-                     f"Treść: {text}\n")
+
+            block = (
+                f"[NSA] {sig} | Wynik: {outcome}\n"
+                f"Zarzut do: {accused}\n"
+                f"Data orzeczenia: {date}\n"
+                f"Teza/Sentencja: {summary}\n"
+                f"Treść: {text}\n"
+            )
             block = TPL_GDPR.render(rank=i, prefix=prefix, text=doc.get("content_text", ""))
         else:
             keywords = doc.get("keywords_text", "") or ", ".join(doc.get("keywords", []))
@@ -405,67 +404,63 @@ def render_gdpr_card(doc: dict[str, Any]) -> None:
         unsafe_allow_html=True,
     )
 
-import re
-from typing import Any
-import streamlit as st
 
-def render_nsa_card(doc: dict[str, Any], rank: int) -> None:
+def render_nsa_card(doc: dict[str, Any]) -> None:
     # Pobieranie głównych metadanych po polskojęzycznych kluczach
     sig = doc.get("Tytuł", doc.get("signature", "Brak sygnatury"))
     court = doc.get("Sąd", "NSA")
-    
+
     # Podtytuł (np. symbol z opisem)
     symbol = doc.get("Symbol z opisem", "")
-    
+
     # Daty i wyniki
     date_issued = doc.get("Data orzeczenia", "Brak daty")
     date_received = doc.get("Data wpływu", "")
     outcome = doc.get("Treść wyniku", "Brak informacji")
-    
+
     # Skarżony organ (może być listą lub stringiem)
     accused_body = doc.get("Skarżony organ", [])
     if isinstance(accused_body, list):
         accused_str = ", ".join(accused_body) if accused_body else "Brak danych"
     else:
         accused_str = str(accused_body)
-    
+
     # Teksty
     summary = doc.get("Uzasadnienie", "")
     ruling = doc.get("Sentencja", "")
-    
+
     # Listy: Sędziowie, Hasła, Przepisy
     judges = doc.get("Sędziowie", [])
     if isinstance(judges, list):
         judges_str = ", ".join(judges) if judges else "Brak danych"
     else:
         judges_str = str(judges)
-        
+
     keywords = doc.get("Hasła tematyczne", [])
     if isinstance(keywords, list):
         kw_str = ", ".join(keywords) if keywords else "Brak"
     else:
         kw_str = str(keywords)
-        
+
     acts = doc.get("Powołane przepisy", [])
     if isinstance(acts, list):
         acts_str = ", ".join(acts) if acts else "Brak"
     else:
         acts_str = str(acts)
-    
+
     # Budowanie kodu HTML z ładnymi wcięciami w Pythonie
     raw_html = f"""
         <article class="p-3 mb-3 border rounded shadow-sm bg-white">
           <main>
             <h2 style="margin-top: 0; margin-bottom: 0.5rem;">
               <span style="color: #0e4591; font-weight: bold; font-size: 1.15rem;">{sig}</span>
-              <span class="badge bg-secondary" style="margin-left: 0.5rem; vertical-align: middle;">Wynik #{rank}</span>
               <span class="badge bg-info" style="margin-left: 0.5rem; vertical-align: middle; color: white;">{court}</span>
             </h2>
             <p class="text-muted mb-2">{symbol}</p>
             
             <div class="p-2 mb-3" style="background-color: #f8f9fa; border-radius: 5px; font-size: 0.85rem; color: #3f444f;">
               <strong>Data orzeczenia:</strong> {date_issued}
-              {f' | <strong>Data wpływu:</strong> {date_received}' if date_received else ''} <br>
+              {f" | <strong>Data wpływu:</strong> {date_received}" if date_received else ""} <br>
               <strong>Skarżony organ:</strong> {accused_str} <br>
               <strong>Wynik:</strong> {outcome} 
             </div>
@@ -493,20 +488,21 @@ def render_nsa_card(doc: dict[str, Any], rank: int) -> None:
           <footer class="mt-1"><small class="text-muted">score: {doc.get("_score", 0):.3f}</small></footer>
         </article>
     """
-    
+
     # 🔴 KLUCZOWA ZMIANA: Usunięcie WSZYSTKICH spacji i tabulacji na początku każdej linii.
     # Zapobiega to traktowaniu zagnieżdżonych divów przez Streamlit jako bloki kodu (```).
     clean_html = re.sub(r"^[ \t]+", "", raw_html, flags=re.MULTILINE)
-    
+
     st.markdown(clean_html, unsafe_allow_html=True)
+
 
 def render_card(doc: dict[str, Any]) -> None:
     """Dispatcher — wybiera typ karty na podstawie doc_type."""
     dtype = doc.get("doc_type", "")
     if dtype == "nsa_judgment":
-        render_nsa_card(doc, rank)
+        render_nsa_card(doc)
     elif dtype == "legal_act_article":
-        render_act_article_card(doc, rank)
+        render_act_article_card(doc)
     if dtype == "legal_act_article":
         render_act_article_card(doc)
     elif dtype in ("gdpr_article", "gdpr_recital"):
@@ -529,7 +525,7 @@ def render_tags(res: SearchResult, kw_filter: str | None = None):
     caption = f"""
     Znaleziono {len(res.full)} dokumentów 
     ({len(res.decisions)} decyzji, {len(res.act_arts)} u.o.d.o., 
-    {len(res.gdpr_docs)} RODO, {len(res.graph_docs)} przez graf) · {res.search_time:.2f}s"""
+    {len(res.gdpr_docs)} RODO,{len(res.nsa_docs)} NSA, {len(res.graph_docs)} przez graf) · {res.search_time:.2f}s"""
 
     if _tag_info:
         caption += _tag_info
@@ -565,35 +561,44 @@ def render_documents(res: SearchResult):
                 f"Decyzje UODO ({len(res.decisions)})",
                 f"Ustawa u.o.d.o. ({len(res.act_arts)})",
                 f"RODO ({len(res.gdpr_docs)})",
+                f"NSA ({len(res.nsa_docs)})",
                 f"Graf ({len(res.graph_docs)})",
             ]
         )
 
         with tabs[0]:
-            for i, doc in enumerate(res.full, 1):
+            for doc in res.full:
                 render_card(doc)
         with tabs[1]:
             if res.decisions:
                 for doc in res.decisions:
                     render_decision_card(doc)
             else:
-                _ = st.info("Brak decyzji UODO dla tego zapytania.")
+                st.info("Brak decyzji UODO dla tego zapytania.")
         with tabs[2]:
             if res.act_arts:
                 for doc in res.act_arts:
                     render_act_article_card(doc)
             else:
-                _ = st.info("Brak artykułów ustawy dla tego zapytania.")
+                st.info("Brak artykułów ustawy dla tego zapytania.")
         with tabs[3]:
             if res.gdpr_docs:
                 for doc in res.gdpr_docs:
                     render_gdpr_card(doc)
             else:
-                _ = st.info("Brak artykułów RODO dla tego zapytania.")
+                st.info("Brak artykułów RODO dla tego zapytania.")
         with tabs[4]:
+            if res.nsa_docs:
+                st.markdown("### 🏛️ Orzeczenia NSA (debug)")
+                st.json(res.nsa_docs[0])  # ← See ALL fields!
+                for i, doc in enumerate(res.nsa_docs[:3], 1):
+                    render_nsa_card(doc)
+            else:
+                st.info("Brak orzeczeń NSA dla tego zapytania.")
+        with tabs[5]:
             if res.graph_docs:
-                _ = st.info("Decyzje powiązane przez cytowania z wynikami semantic search.")
+                st.info("Decyzje powiązane przez cytowania z wynikami semantic search.")
                 for doc in res.graph_docs:
                     render_decision_card(doc)
             else:
-                _ = st.info("Brak wyników z grafu powiązań.")
+                st.info("Brak wyników z grafu powiązań.")

@@ -333,7 +333,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Indeksuje ustawę o ochronie danych osobowych do Qdrant"
     )
-    parser.add_argument("--md", required=True, help="Ścieżka do pliku .md ustawy")
+    parser.add_argument("--md", default="tools/D20191781L.md")
     parser.add_argument("--qdrant", default=QDRANT_URL)
     parser.add_argument(
         "--rebuild-act",

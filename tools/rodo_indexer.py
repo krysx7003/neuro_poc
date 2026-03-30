@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """rodo_indexer.py — parsuje tekst RODO (2016/679) z pliku Markdown i indeksuje go w Qdrant.
 
 Uruchomienie:
@@ -28,7 +27,7 @@ from config import COLLECTION_NAME, EMBED_MODEL, QDRANT_API_KEY, QDRANT_URL
 
 # ─────────────────────────────────────────────────────────────────────────────
 
-DEFAULT_MD = "rodo_2016_679_pl.md"
+DEFAULT_MD = "tools/rodo_2016_679_pl.md"
 RODO_SOURCE = "RODO 2016/679"
 RODO_URL = "https://eur-lex.europa.eu/legal-content/PL/TXT/?uri=CELEX:32016R0679"
 

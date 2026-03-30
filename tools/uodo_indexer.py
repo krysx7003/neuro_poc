@@ -304,7 +304,7 @@ def index_decisions(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--jsonl", default="uodo_decisions.jsonl")
+    parser.add_argument("--jsonl", default="tools/uodo_decisions.jsonl")
     parser.add_argument("--qdrant", default=QDRANT_URL)
     parser.add_argument("--rebuild", action="store_true")
     parser.add_argument("--device", default=None)

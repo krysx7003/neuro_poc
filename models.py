@@ -51,6 +51,7 @@ class SearchResult(BaseModel):
     act_arts: list[dict[str, Any]]
     gdpr_docs: list[dict[str, Any]]
     graph_docs: list[dict[str, Any]]
+    nsa_docs: list[dict[str, Any]]
     tags: list[str]
     search_time: float
 
@@ -62,6 +63,7 @@ class SearchResult(BaseModel):
             act_arts=[d for d in docs if d.get("doc_type") == "legal_act_article"],
             gdpr_docs=[d for d in docs if d.get("doc_type") in ("gdpr_article", "gdpr_recital")],
             graph_docs=[d for d in docs if d.get("_source") == "graph"],
+            nsa_docs=[d for d in docs if d.get("doc_type") == "nsa_judgment"],
             tags=tags,
             search_time=time,
         )
