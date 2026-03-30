@@ -1,6 +1,4 @@
-"""
-Interfejs użytkownika — karty wyników, budowanie kontekstu LLM, CSS.
-"""
+"""Interfejs użytkownika — karty wyników, budowanie kontekstu LLM, CSS."""
 
 import re
 import textwrap
@@ -16,28 +14,9 @@ from models import (
     TPL_GDPR,
     TPL_HEADER,
     AgentMemory,
+    QueryDecomposition,
+    SearchResult,
 )
-
-# ─────────────────────────── CSS PORTALU UODO ────────────────────
-# uodo-blue-10: #f5f8f8;
-# --uodo-blue-20: #e8f1fd;
-# --uodo-blue-30: #dde3ee; Outline
-# --uodo-blue-33: #a5b3dd;
-# --uodo-blue-35: #6d83cc;
-# --uodo-blue-38: #356bcc;
-# --uodo-blue-40: #0058cc;
-# --uodo-blue-50: #275faa;
-# --uodo-blue-60: #0e4591; Przycisk szukaj/background sidebara
-# --uodo-blue-80: #092e60;
-# --uodo-dark-gray: #3f444f;
-# --uodo-light-gray: #c8ccd3;
-# --uodo-red: #f25a5a;
-# --uodo-red-logo: #cd071e;
-# --uodo-red-dark: #b22222;
-# --uodo-white: #fff;
-# --uodo-black: rgba(26,26,28,1);
-# --body-color: rgba(26,26,28,1);
-# --content-width: 1070px;
 
 UODO_CSS = """
 <style>
@@ -138,6 +117,7 @@ def _extract_fragment(content: str, query: str, max_len: int = 2000) -> str:
 def build_context(
     docs: list[dict[str, Any]],
     query: str,
+    thread_id: int | None,
     max_chars: int = 18000,
     filters: dict[str, Any] | None = None,
     memory: AgentMemory | None = None,
@@ -154,9 +134,7 @@ def build_context(
     if f.get("term_legal_basis"):
         filter_lines.append(f"Podstawa prawna: {', '.join(f['term_legal_basis'])}")
     if f.get("term_corrective_measure"):
-        filter_lines.append(
-            f"Środek naprawczy: {', '.join(f['term_corrective_measure'])}"
-        )
+        filter_lines.append(f"Środek naprawczy: {', '.join(f['term_corrective_measure'])}")
     if f.get("term_sector"):
         filter_lines.append(f"Sektor: {', '.join(f['term_sector'])}")
     if f.get("keyword"):
@@ -169,23 +147,24 @@ def build_context(
     )
 
     memory_note = ""
-    if memory:
-        related = memory.find_related(query)
+
+    if memory and thread_id:
+        related = memory.find_related(query, thread_id)
         if related:
-            snippets = [
+            snippets = []
+            for e in related[:3]:
                 f"- Poprzednie pytanie: «{e.query}» → znalezione decyzje: "
-                + (", ".join(e.top_signatures[:3]) if e.top_signatures else "brak")
-                for e in related[:2]
-            ]
+                if e.search_result.full:
+                    for res in e.search_result.full[:3]:
+                        (", ".join(res.get("signature", "")))
+
+                else:
+                    "brak"
             memory_note = (
-                "KONTEKST Z POPRZEDNICH ANALIZ (tej sesji):\n"
-                + "\n".join(snippets)
-                + "\n"
+                "KONTEKST Z POPRZEDNICH ANALIZ (tej sesji):\n" + "\n".join(snippets) + "\n"
             )
 
-    header = TPL_HEADER.render(
-        query=query, filter_note=filter_note, memory_note=memory_note
-    )
+    header = TPL_HEADER.render(query=query, filter_note=filter_note, memory_note=memory_note)
     parts = [header]
     chars = len(header)
 
@@ -230,10 +209,9 @@ def build_context(
                      f"Data orzeczenia: {date}\n"
                      f"Teza/Sentencja: {summary}\n"
                      f"Treść: {text}\n")
+            block = TPL_GDPR.render(rank=i, prefix=prefix, text=doc.get("content_text", ""))
         else:
-            keywords = doc.get("keywords_text", "") or ", ".join(
-                doc.get("keywords", [])
-            )
+            keywords = doc.get("keywords_text", "") or ", ".join(doc.get("keywords", []))
             acts = doc.get("related_acts", [])[:4] + doc.get("related_eu_acts", [])[:2]
             block = TPL_DECISION.render(
                 rank=i,
@@ -256,9 +234,12 @@ def build_context(
 
 
 # ─────────────────────────── KARTY WYNIKÓW ───────────────────────
-
-
 def decision_url(doc: dict[str, Any]) -> str:
+    """Tworzy adres url decyzji.
+
+    1. Jeżeli dokument ma pole 'source_url' zwraca jego zawartość
+    2. Jeżeli brakuje tego pola url generowany jest na podstawie sygnatury
+    """
     sig = doc.get("signature", "")
     url = doc.get("source_url", "")
     if url:
@@ -271,7 +252,8 @@ def decision_url(doc: dict[str, Any]) -> str:
     return f"{UODO_PORTAL_BASE}/urn:ndoc:gov:pl:uodo:{year}:{slug}/content"
 
 
-def render_decision_card(doc: dict[str, Any], rank: int) -> None:
+def render_decision_card(doc: dict[str, Any]) -> None:
+    """Wyświetla dane dokumentu typu decyzja."""
     sig = doc.get("signature", "?")
     status = doc.get("status", "")
     date = doc.get("date_published", "") or doc.get("date_issued", "")
@@ -285,8 +267,7 @@ def render_decision_card(doc: dict[str, Any], rank: int) -> None:
     if isinstance(kw_list, str):
         kw_list = [k.strip() for k in kw_list.split(",") if k.strip()]
     taxonomy_values = {
-        v.lower()
-        for v in doc.get("term_decision_type", []) + doc.get("term_sector", [])
+        v.lower() for v in doc.get("term_decision_type", []) + doc.get("term_sector", [])
     }
     kw_list = [k for k in kw_list if k.lower() not in taxonomy_values]
 
@@ -359,15 +340,14 @@ def render_decision_card(doc: dict[str, Any], rank: int) -> None:
     st.divider()
 
 
-def render_act_article_card(doc: dict[str, Any], rank: int) -> None:
+def render_act_article_card(doc: dict[str, Any]) -> None:
+    """Wyświetla dane dokumentu typu artykuł."""
     art_num = doc.get("article_num", "?")
     chunk_idx = doc.get("chunk_index", 0)
     total = doc.get("chunk_total", 1)
     score = doc.get("_score", 0)
     text = doc.get("content_text", "")[:600]
-    label = f"Art. {art_num} u.o.d.o." + (
-        f" (część {chunk_idx + 1}/{total})" if total > 1 else ""
-    )
+    label = f"Art. {art_num} u.o.d.o." + (f" (część {chunk_idx + 1}/{total})" if total > 1 else "")
 
     st.markdown(
         f"""
@@ -388,7 +368,8 @@ def render_act_article_card(doc: dict[str, Any], rank: int) -> None:
     )
 
 
-def render_gdpr_card(doc: dict[str, Any], rank: int) -> None:
+def render_gdpr_card(doc: dict[str, Any]) -> None:
+    """Wyświetla dane dokumentu typu GDPR."""
     art_num = doc.get("article_num", "?")
     chunk_idx = doc.get("chunk_index", 0)
     total = doc.get("chunk_total", 1)
@@ -519,14 +500,100 @@ def render_nsa_card(doc: dict[str, Any], rank: int) -> None:
     
     st.markdown(clean_html, unsafe_allow_html=True)
 
-def render_card(doc: dict[str, Any], rank: int) -> None:
+def render_card(doc: dict[str, Any]) -> None:
     """Dispatcher — wybiera typ karty na podstawie doc_type."""
     dtype = doc.get("doc_type", "")
     if dtype == "nsa_judgment":
         render_nsa_card(doc, rank)
     elif dtype == "legal_act_article":
         render_act_article_card(doc, rank)
+    if dtype == "legal_act_article":
+        render_act_article_card(doc)
     elif dtype in ("gdpr_article", "gdpr_recital"):
-        render_gdpr_card(doc, rank)
+        render_gdpr_card(doc)
     else:
-        render_decision_card(doc, rank)
+        render_decision_card(doc)
+
+
+def render_tags(res: SearchResult, kw_filter: str | None = None):
+    """Wyświetla podsumowanie wyników wyszukiwania dokumentów."""
+    _tag_info: str | None = None
+    if kw_filter:
+        _tag_info = f" · tag: `{kw_filter}`" if kw_filter.strip() else ""
+
+    if res.tags:
+        with st.expander("🏷️ Tagi", expanded=False):
+            for t in res.tags:
+                _ = st.caption(f"`{t}`")
+
+    caption = f"""
+    Znaleziono {len(res.full)} dokumentów 
+    ({len(res.decisions)} decyzji, {len(res.act_arts)} u.o.d.o., 
+    {len(res.gdpr_docs)} RODO, {len(res.graph_docs)} przez graf) · {res.search_time:.2f}s"""
+
+    if _tag_info:
+        caption += _tag_info
+
+    _ = st.caption(caption)
+
+
+def render_reasoning(decomp: QueryDecomposition, effective_query: str):
+    """Wyświetla dekomopzycje zapytania."""
+    with st.expander("🧠 Reasoning Step — jak zrozumiałem pytanie", expanded=False):
+        _ = st.caption(f"**Typ zapytania:** {decomp.query_type.value}")
+        _ = st.caption(f"**Rozumowanie:** {decomp.reasoning}")
+        if decomp.search_keywords:
+            _ = st.caption(
+                "**Słowa kluczowe:** " + " · ".join(f"`{k}`" for k in decomp.search_keywords)
+            )
+        if decomp.gdpr_articles_hint:
+            _ = st.caption("**Wskazane artykuły RODO:** " + ", ".join(decomp.gdpr_articles_hint))
+        if decomp.uodo_act_articles_hint:
+            _ = st.caption(
+                "**Wskazane artykuły u.o.d.o.:** " + ", ".join(decomp.uodo_act_articles_hint)
+            )
+        if decomp.enriched_query != effective_query:
+            _ = st.caption(f"**Wzbogacone zapytanie:** _{decomp.enriched_query}_")
+
+
+def render_documents(res: SearchResult):
+    """Wyświetla listę dokumentów dotyczących zapytania."""
+    with st.expander(f"📋 Dokumenty ({len(res.full)})", expanded=False):
+        tabs = st.tabs(
+            [
+                f"Wszystkie ({len(res.full)})",
+                f"Decyzje UODO ({len(res.decisions)})",
+                f"Ustawa u.o.d.o. ({len(res.act_arts)})",
+                f"RODO ({len(res.gdpr_docs)})",
+                f"Graf ({len(res.graph_docs)})",
+            ]
+        )
+
+        with tabs[0]:
+            for i, doc in enumerate(res.full, 1):
+                render_card(doc)
+        with tabs[1]:
+            if res.decisions:
+                for doc in res.decisions:
+                    render_decision_card(doc)
+            else:
+                _ = st.info("Brak decyzji UODO dla tego zapytania.")
+        with tabs[2]:
+            if res.act_arts:
+                for doc in res.act_arts:
+                    render_act_article_card(doc)
+            else:
+                _ = st.info("Brak artykułów ustawy dla tego zapytania.")
+        with tabs[3]:
+            if res.gdpr_docs:
+                for doc in res.gdpr_docs:
+                    render_gdpr_card(doc)
+            else:
+                _ = st.info("Brak artykułów RODO dla tego zapytania.")
+        with tabs[4]:
+            if res.graph_docs:
+                _ = st.info("Decyzje powiązane przez cytowania z wynikami semantic search.")
+                for doc in res.graph_docs:
+                    render_decision_card(doc)
+            else:
+                _ = st.info("Brak wyników z grafu powiązań.")

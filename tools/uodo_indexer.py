@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-"""
-UODO Indexer — embedduje i indeksuje orzeczenia UODO w Qdrant.
+"""UODO Indexer — embedduje i indeksuje orzeczenia UODO w Qdrant.
 
 Kolekcja: uodo_decisions
 Użycie:
@@ -12,7 +10,7 @@ import argparse
 import hashlib
 import json
 import uuid
-from typing import Any, Dict
+from typing import Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -23,11 +21,15 @@ from qdrant_client.models import (
 )
 from sentence_transformers import SentenceTransformer
 
+from config import (
+    COLLECTION_NAME,
+    EMBED_MODEL,
+    QDRANT_API_KEY,
+    QDRANT_URL,
+)
+
 # ─────────────────────────── CONFIG ──────────────────────────────
 
-QDRANT_URL = "http://localhost:6333"
-COLLECTION_NAME = "uodo_decisions"
-EMBED_MODEL = "sdadas/mmlw-retrieval-roberta-large"
 EMBED_MAX_CHARS = 5500
 BATCH_SIZE = 50
 
@@ -35,10 +37,10 @@ BATCH_SIZE = 50
 # ─────────────────────────── HELPERS ─────────────────────────────
 
 
-def load_embedder(device: str = None) -> SentenceTransformer:
+def load_embedder(device: str | None = None) -> SentenceTransformer:
     # if device is None:
     # device = "cuda" if torch.cuda.is_available() else "cpu"
-    device = "cpu"
+    device = "cuda"
     print(f"🤖 Ładuję embedder: {EMBED_MODEL} ({device})")
     return SentenceTransformer(EMBED_MODEL, device=device, trust_remote_code=True)
 
@@ -47,9 +49,9 @@ def sig_to_uuid(sig: str) -> str:
     return str(uuid.UUID(bytes=hashlib.md5(f"uodo:{sig}".encode()).digest()))
 
 
-def build_embed_text(doc: Dict) -> str:
-    """
-    Tekst do embeddingu — kolejność ważna:
+def build_embed_text(doc: dict) -> str:
+    """Tekst do embeddingu — kolejność ważna.
+
     1. Sygnatura + tytuł pełny (opis naruszenia) — najwyższa waga
     2. Keywords — tagi UODO z baz terminologicznych
     3. Podmiot decyzji (entities)
@@ -82,18 +84,14 @@ def build_embed_text(doc: Dict) -> str:
     )
 
 
-def build_payload(doc: Dict) -> Dict[str, Any]:
+def build_payload(doc: dict) -> dict[str, Any]:
     refs = doc.get("refs_from_content", {})
 
     # Deduplikacja: łącz refs z treści i z related_legislation/rulings
     acts = list(
         dict.fromkeys(
             refs.get("acts", [])
-            + [
-                r["signature"]
-                for r in doc.get("related_legislation", [])
-                if r.get("type") == "act"
-            ]
+            + [r["signature"] for r in doc.get("related_legislation", []) if r.get("type") == "act"]
         )
     )
     eu_acts = list(
@@ -138,15 +136,12 @@ def build_payload(doc: Dict) -> Dict[str, Any]:
     subject = " | ".join(
         e.get("name", "") or e.get("title", "")
         for e in doc.get("entities", [])
-        if e.get("function") in ("other", "author")
-        and (e.get("name") or e.get("title"))
+        if e.get("function") in ("other", "author") and (e.get("name") or e.get("title"))
     )
 
     # Typy relacji do aktów (dla grafu — np. implements RODO, quotes ustawa)
     refs_full = doc.get("refs_full", [])
-    relation_map = {
-        r.get("signature", ""): r.get("relation", "refers") for r in refs_full
-    }
+    relation_map = {r.get("signature", ""): r.get("relation", "refers") for r in refs_full}
 
     return {
         "doc_type": "uodo_decision",
@@ -192,9 +187,8 @@ def build_payload(doc: Dict) -> Dict[str, Any]:
 
 def index_decisions(
     jsonl_path: str,
-    qdrant_url: str = QDRANT_URL,
     rebuild: bool = False,
-    device: str = None,
+    device: str | None = None,
 ):
     docs = []
     with open(jsonl_path, encoding="utf-8") as f:
@@ -209,9 +203,13 @@ def index_decisions(
 
     model = load_embedder(device)
     dim = model.get_sentence_embedding_dimension()
+    if dim is None:
+        print("📐 Wymiar wektora nieznany")
+        exit()
+
     print(f"📐 Wymiar wektora: {dim}")
 
-    client = QdrantClient(url=qdrant_url, timeout=60)
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=60)
     existing = {c.name for c in client.get_collections().collections}
 
     if COLLECTION_NAME in existing and rebuild:
@@ -276,9 +274,7 @@ def index_decisions(
             if not sig:
                 continue
             try:
-                vec = model.encode(
-                    build_embed_text(doc), normalize_embeddings=True
-                ).tolist()
+                vec = model.encode(build_embed_text(doc), normalize_embeddings=True).tolist()
             except Exception as e:
                 print(f"  ⚠️ Embedding błąd {sig}: {e}")
                 errors += 1
@@ -313,4 +309,4 @@ if __name__ == "__main__":
     parser.add_argument("--rebuild", action="store_true")
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
-    index_decisions(args.jsonl, args.qdrant, args.rebuild, args.device)
+    index_decisions(args.jsonl, args.rebuild, args.device)

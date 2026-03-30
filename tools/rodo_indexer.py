@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-rodo_indexer.py — parsuje tekst RODO (2016/679) z pliku Markdown i indeksuje go w Qdrant.
+"""rodo_indexer.py — parsuje tekst RODO (2016/679) z pliku Markdown i indeksuje go w Qdrant.
 
 Uruchomienie:
   python rodo_indexer.py
@@ -21,7 +20,11 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Dict, List
+from typing import Any
+
+from sentence_transformers import SentenceTransformer
+
+from config import COLLECTION_NAME, EMBED_MODEL, QDRANT_API_KEY, QDRANT_URL
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -38,7 +41,7 @@ CHUNK_OVERLAP = 100
 
 def split_into_chunks(
     text: str, max_chars: int = CHUNK_MAX_CHARS, overlap: int = CHUNK_OVERLAP
-) -> List[str]:
+) -> list[str]:
     if len(text) <= max_chars:
         return [text]
     paragraphs = re.split(r"\n\n+", text)
@@ -65,18 +68,18 @@ def split_into_chunks(
 # ─────────────────────────── PARSOWANIE MD ───────────────────────────────────
 
 
-def parse_rodo_md(text: str) -> List[Dict]:
-    """
-    Parsuje plik Markdown RODO.
+def parse_rodo_md(text: str) -> list[dict[str, Any]]:
+    """Parsuje plik Markdown RODO.
+
     Motywy: linie zaczynające się od '- (N) tekst'
     Artykuły: nagłówki '#+ Artykuł N', tytuł to kolejny niepusty nagłówek
     """
     lines = text.splitlines()
-    documents = []
+    documents: list[dict[str, Any]] = []
 
     # ── Motywy ────────────────────────────────────────────────
     recital_re = re.compile(r"^- \((\d{1,3})\)\s+(.*)")
-    recitals: Dict[str, str] = {}
+    recitals: dict[str, str] = {}
     current_recital = None
 
     for line in lines:
@@ -156,9 +159,7 @@ def parse_rodo_md(text: str) -> List[Dict]:
                 if re.match(r"^#{1,6}\s+ROZDZIAŁ\s+", next_line):
                     break
                 # Pomiń separatory stron i nagłówki stron
-                if re.match(r"^---$", next_line) or re.match(
-                    r"^#{1,6}\s+Strona\s+\d+", next_line
-                ):
+                if re.match(r"^---$", next_line) or re.match(r"^#{1,6}\s+Strona\s+\d+", next_line):
                     j += 1
                     continue
                 body_lines.append(next_line)
@@ -217,26 +218,24 @@ def get_embedder(model_name: str):
     return SentenceTransformer(model_name, trust_remote_code=True)
 
 
-def embed_batch(texts: List[str], embedder, batch_size: int = 32) -> List[List[float]]:
+def embed_batch(
+    texts: list[str], embedder: SentenceTransformer, batch_size: int = 32
+) -> list[list[float]]:
     all_vecs = []
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
-        vecs = embedder.encode(
-            batch, normalize_embeddings=True, show_progress_bar=False
-        )
+        vecs = embedder.encode(batch, normalize_embeddings=True, show_progress_bar=False)
         all_vecs.extend(vecs.tolist())
         print(f"  Embeddingi: {min(i + batch_size, len(texts))}/{len(texts)}", end="\r")
     print()
     return all_vecs
 
 
-def index_documents(
-    documents: List[Dict], qdrant_url: str, collection_name: str, model_name: str
-):
+def index_documents(documents: list[dict[str, Any]], collection_name: str, model_name: str):
     from qdrant_client import QdrantClient
     from qdrant_client.models import FieldCondition, Filter, MatchValue, PointStruct
 
-    client = QdrantClient(url=qdrant_url, timeout=60)
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=60)
 
     collections = [c.name for c in client.get_collections().collections]
     if collection_name not in collections:
@@ -284,13 +283,10 @@ def index_documents(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Indeksuje RODO w Qdrant z pliku Markdown"
-    )
+    parser = argparse.ArgumentParser(description="Indeksuje RODO w Qdrant z pliku Markdown")
     parser.add_argument("--md", default=DEFAULT_MD)
-    parser.add_argument("--qdrant", default="http://localhost:6333")
-    parser.add_argument("--collection", default="uodo_decisions")
-    parser.add_argument("--model", default="sdadas/mmlw-retrieval-roberta-large")
+    parser.add_argument("--collection", default=COLLECTION_NAME)
+    parser.add_argument("--model", default=EMBED_MODEL)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -308,13 +304,11 @@ def main():
     if args.dry_run:
         print("\n=== DRY RUN — przykłady ===")
         for doc in documents[:2]:
-            print(
-                f"\n[{doc['doc_type']}] {doc['article_num']} | rozdział {doc['chapter']}"
-            )
+            print(f"\n[{doc['doc_type']}] {doc['article_num']} | rozdział {doc['chapter']}")
             print(doc["content_text"][:300])
         return
 
-    index_documents(documents, args.qdrant, args.collection, args.model)
+    index_documents(documents, args.collection, args.model)
 
 
 if __name__ == "__main__":
