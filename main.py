@@ -35,6 +35,11 @@ from ui import (
     PAGE_HEADER_HTML,
     UODO_CSS,
     build_context,
+    render_act_article_card,
+    render_card,
+    render_decision_card,
+    render_gdpr_card,
+    render_nsa_card,
     render_documents,
     render_reasoning,
     render_tags,
@@ -103,6 +108,7 @@ def main() -> None:
         show_decisions = st.checkbox("Decyzje UODO", value=True)
         show_act = st.checkbox("Ustawa o ochronie danych (u.o.d.o.)", value=True)
         show_gdpr = st.checkbox("RODO (rozporządzenie UE 2016/679)", value=True)
+        show_nsa = st.checkbox("Orzeczenia NSA", value=True)
 
         _ = st.markdown("---")
         try:
@@ -110,6 +116,8 @@ def main() -> None:
             _ = st.markdown("### 📊 Baza wiedzy")
             st.metric("Decyzje UODO", stats.get("decisions", 0))
             st.metric("Artykuły u.o.d.o.", stats.get("act_chunks", 0))
+            st.metric("NSA orzeczenia", stats.get("nsa_judgments", 0))
+            st.metric("RODO", stats.get("gdpr_docs", 0))
             if stats.get("edges"):
                 st.metric("Powiązania w grafie", stats.get("edges", 0))
         except Exception:
@@ -123,12 +131,15 @@ def main() -> None:
         doc_types.append("legal_act_article")
     if show_gdpr:
         doc_types.extend(["gdpr_article", "gdpr_recital"])
+    if show_nsa:
+        doc_types.append("nsa_judgment")
     if not doc_types:
         doc_types = [
             "uodo_decision",
             "legal_act_article",
             "gdpr_article",
             "gdpr_recital",
+            "nsa_judgment",
         ]
 
     taxonomy = get_taxonomy_options()
@@ -264,6 +275,8 @@ def main() -> None:
             ("🕵️", "Inspektor ochrony danych — konflikt interesów"),
             ("📸", "Zdjęcie tablicy rejestracyjnej w internecie a RODO"),
             ("📜", "DKN.5131.15.2025"),
+            ("⚖️", "śmierć podatnika a zobowiązanie podatkowe"),
+            ("🏛️", "NSA uchwała składu siedmiu sędziów"),
         ]
         cols = st.columns(2)
         for idx, (emoji, question) in enumerate(examples):
@@ -375,6 +388,21 @@ def search_docs(
         res = SearchResult.from_docs(full_docs, _tags, search_time)
         render_tags(res, kw_filter)
 
+        decisions = [d for d in docs if d.get("doc_type") == "uodo_decision"]
+        act_arts = [d for d in docs if d.get("doc_type") == "legal_act_article"]
+        gdpr_docs = [d for d in docs if d.get("doc_type") in ("gdpr_article", "gdpr_recital")]
+        nsa_docs = [d for d in docs if d.get("doc_type") == "nsa_judgment"]
+        graph_docs = [d for d in docs if d.get("_source") == "graph"]
+
+        _tag_info = f" · tag: `{kw_filter}`" if kw_filter.strip() else ""
+        st.caption(
+            f"Znaleziono {len(docs)} dokumentów "
+            f"({len(decisions)} decyzji, {len(act_arts)} u.o.d.o., "
+            f"{len(gdpr_docs)} RODO, {len(nsa_docs)} NSA, {len(graph_docs)} przez graf) · {search_time:.2f}s"
+            + _tag_info
+        )
+        if _tags:
+            st.caption("🏷️ Tagi: " + " · ".join(f"`{t}`" for t in _tags))
     return res
 
 
@@ -469,6 +497,57 @@ def answer_query(
                         search_result=res,
                         full_answer=answer,
                     )
+                )
+                _render_memory_history(memory_placeholder, memory)
+
+                st.markdown(f"### 📋 Dokumenty ({len(docs)})")
+        tabs = st.tabs(
+            [
+                f"Wszystkie ({len(docs)})",
+                f"Decyzje UODO ({len(decisions)})",
+                f"Ustawa u.o.d.o. ({len(act_arts)})",
+                f"RODO ({len(gdpr_docs)})",
+                f"NSA ({len(nsa_docs)})",
+                f"Graf ({len(graph_docs)})",
+            ]
+        )
+
+        with tabs[0]:
+            for i, doc in enumerate(docs, 1):
+                render_card(doc, i)
+        with tabs[1]:
+            if decisions:
+                for i, doc in enumerate(decisions, 1):
+                    render_decision_card(doc, i)
+            else:
+                st.info("Brak decyzji UODO dla tego zapytania.")
+        with tabs[2]:
+            if act_arts:
+                for i, doc in enumerate(act_arts, 1):
+                    render_act_article_card(doc, i)
+            else:
+                st.info("Brak artykułów ustawy dla tego zapytania.")
+        with tabs[3]:
+            if gdpr_docs:
+                for i, doc in enumerate(gdpr_docs, 1):
+                    render_gdpr_card(doc, i)
+            else:
+                st.info("Brak artykułów RODO dla tego zapytania.")
+        with tabs[4]:
+            if nsa_docs:
+                st.markdown("### 🏛️ Orzeczenia NSA (debug)")
+                st.json(nsa_docs[0])  # ← See ALL fields!
+                for i, doc in enumerate(nsa_docs[:3], 1):
+                    render_nsa_card(doc, i)
+            else:
+                st.info("Brak orzeczeń NSA dla tego zapytania.")
+        with tabs[5]:
+            if graph_docs:
+                st.info("Decyzje powiązane przez cytowania z wynikami semantic search.")
+                for i, doc in enumerate(graph_docs, 1):
+                    render_decision_card(doc, i)
+            else:
+                st.info("Brak wyników z grafu powiązań.")
 
                     print(f"Thread id: {thread_id}")
                     id = memory.add(entry, thread_id)
