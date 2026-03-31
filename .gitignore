@@ -6,6 +6,8 @@ __pycache__/
 venv/
 env/
 qdrant_data/
+daneUODO/
+daneUODO_8edc2171dd9bf32f723e9cc9870d55244104e320.zip
 
 # Dane i modele
 *.json.bak
