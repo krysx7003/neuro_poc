@@ -10,7 +10,7 @@ function App() {
     ];
     return (
         <>
-            <DocumentList docs={docs} />
+            <DocumentList full_docs={docs} />
         </>
     );
 }

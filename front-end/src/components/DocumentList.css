@@ -1,0 +1,34 @@
+.row {
+  display: flex;
+  color: #002BB9;
+  border: 2px solid black;
+  border-radius: 15px 15px 0px 0px;
+  margin-bottom: 0;
+  justify-content: space-between;  /* Distributes evenly across full width */
+  gap: 0; 
+}
+.row-item {
+  flex: 1;
+  padding-right: 15px;
+  padding-left: 15px;
+  text-align: center; 
+}
+.row-item:first-child {
+  border-top-left-radius: 13px;
+}
+
+.row-item:last-child {
+  border-top-right-radius: 13px;
+}
+.active {
+    background-color: #dee6ff99;
+}
+.document-display {
+  margin-top: 0;
+  padding-top: 0;
+  list-style: none;
+  border: 2px solid black;
+  border-top: none;   
+  border-radius: 0px 0px 15px 15px;
+  overflow: hidden;  
+}
