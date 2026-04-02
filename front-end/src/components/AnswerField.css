@@ -1,0 +1,20 @@
+.header {
+    display: flex;
+    background-color: #3c69ff;
+    border-radius: 15px 15px 0px 0px;
+    text-align: center; 
+    color: #ffffff;
+}
+
+.header-text {
+    flex: 1;
+}
+
+.body {
+    border-radius: 0px 0px 15px 15px;
+    border: 2px solid #3c69ff;
+    padding-top: 5px;
+    padding-right: 15px;
+    padding-left: 15px;
+    padding-bottom: 5px;
+}

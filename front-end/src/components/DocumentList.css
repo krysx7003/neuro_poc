@@ -2,7 +2,6 @@
   display: flex;
   background-color: #3c69ff;
   color: #ffffff;
-  /* border: 2px solid black; */
   border-radius: 15px 15px 0px 0px;
   margin-bottom: 0;
   justify-content: space-between;  /* Distributes evenly across full width */
