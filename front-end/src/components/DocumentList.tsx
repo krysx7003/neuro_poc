@@ -58,6 +58,8 @@ function DocumentList({ full_docs }: DocumentListProps) {
     const getDocs = (index: number): Document[] => {
         return docs[index] ?? full_docs;
     };
+
+    const selectedDocs: Document[] = getDocs(selectedIndex);
     return (
         <>
             <div className="row">
@@ -79,16 +81,20 @@ function DocumentList({ full_docs }: DocumentListProps) {
                 ))}
             </div>
             <ul className="document-display">
-                {getDocs(selectedIndex).map((doc) => {
-                    const LayoutComponent = DocumentLayoutMap[doc.type];
-                    return (
-                        <li>
-                            <Card key={doc.name}>
-                                <LayoutComponent doc={doc} />
-                            </Card>
-                        </li>
-                    );
-                })}
+                {selectedDocs.length > 0 ? (
+                    selectedDocs.map((doc) => {
+                        const LayoutComponent = DocumentLayoutMap[doc.type];
+                        return (
+                            <li>
+                                <Card key={doc.name}>
+                                    <LayoutComponent doc={doc} />
+                                </Card>
+                            </li>
+                        );
+                    })
+                ) : (
+                    <h2>Nie znaleziono dokumentów</h2>
+                )}
             </ul>
         </>
     );

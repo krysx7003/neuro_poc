@@ -4,9 +4,9 @@ import type { Document } from "./types/components";
 function App() {
     const docs: Document[] = [
         { name: "Test", type: "rodo" },
-        { name: "Test", type: "decision" },
-        { name: "Test", type: "article" },
-        { name: "Test", type: "nsa" },
+        // { name: "Test", type: "decision" },
+        // { name: "Test", type: "article" },
+        // { name: "Test", type: "nsa" },
     ];
     return (
         <>
