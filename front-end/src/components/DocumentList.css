@@ -1,35 +1,37 @@
 .row {
-  display: flex;
-  background-color: #3c69ff;
-  color: #ffffff;
-  border-radius: 15px 15px 0px 0px;
-  margin-bottom: 0;
-  justify-content: space-between;  /* Distributes evenly across full width */
-  gap: 0; 
+    display: flex;
+    background-color: #3c69ff;
+    color: #ffffff;
+    border-radius: 15px 15px 0px 0px;
+    margin-bottom: 0;
+    justify-content: space-between;  /* Distributes evenly across full width */
+    gap: 0; 
 }
 .row-item {
-  flex: 1;
-  padding-right: 15px;
-  padding-left: 15px;
-  text-align: center; 
-  cursor: pointer;
+    flex: 1;
+    padding-right: 15px;
+    padding-left: 15px;
+    text-align: center; 
+    cursor: pointer;
 }
 .row-item:first-child {
-  border-top-left-radius: 13px;
+    border-top-left-radius: 13px;
 }
 
 .row-item:last-child {
-  border-top-right-radius: 13px;
+    border-top-right-radius: 13px;
 }
 .active {
-    background-color: #dee6ff99;
+    background-color: #dee6ff;
+    border: 2px solid #3c69ff;
+    color: #3c69ff;
 }
 .document-display {
-  margin-top: 0;
-  padding-top: 0;
-  list-style: none;
-  border: 2px solid #3c69ff;
-  border-top: none;   
-  border-radius: 0px 0px 15px 15px;
-  overflow: hidden;  
+    margin-top: 0;
+    padding-top: 0;
+    list-style: none;
+    border: 2px solid #3c69ff;
+    border-top: none;   
+    border-radius: 0px 0px 15px 15px;
+    overflow: hidden;  
 }

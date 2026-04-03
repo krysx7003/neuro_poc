@@ -73,6 +73,7 @@ function DocumentList({ full_docs }: DocumentListProps) {
                         onClick={() => {
                             setSelectedIndex(index);
                         }}
+                        key={index}
                         onMouseEnter={() => setHoveredIndex(index)}
                         onMouseLeave={() => setHoveredIndex(-1)}
                     >
@@ -85,8 +86,8 @@ function DocumentList({ full_docs }: DocumentListProps) {
                     selectedDocs.map((doc) => {
                         const LayoutComponent = DocumentLayoutMap[doc.type];
                         return (
-                            <li>
-                                <Card key={doc.name}>
+                            <li key={doc.name}>
+                                <Card>
                                     <LayoutComponent doc={doc} />
                                 </Card>
                             </li>
