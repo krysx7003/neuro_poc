@@ -1,7 +1,11 @@
 import { useState } from "react";
 import "./InputField.css";
 
-function InputField() {
+interface Props {
+    onSearch: (query: string) => void;
+}
+
+function InputField({ onSearch }: Props) {
     const [query, setQuery] = useState("");
     return (
         <div className="query">
@@ -13,7 +17,7 @@ function InputField() {
             <button
                 className="search-btn"
                 type="button"
-                onClick={() => console.log(`Test ${query}`)}
+                onClick={() => onSearch(query)}
             >
                 <h3>Szukaj</h3>
             </button>

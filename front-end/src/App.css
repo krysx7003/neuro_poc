@@ -1,0 +1,11 @@
+.normal {
+    min-height: 100vh;
+    padding: 15vh 30px 0vh 30px; 
+}
+
+.centered {
+    display: grid;
+    align-content: center;
+    min-height: 100vh;
+    padding: 0px 30px; 
+}
