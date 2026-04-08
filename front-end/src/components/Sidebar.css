@@ -1,0 +1,33 @@
+hr {
+    color: #ffffff;
+    margin-left: 5px;
+    margin-right: 5px;
+}
+
+h4 {
+    margin-top: 0px;
+    margin-bottom: 0px;
+}
+
+select {
+    background-color: #ffffff;
+    color: #3c69ff;
+    border-radius: 15px;
+    padding-left: 10px;
+    margin-top: 0px;
+    margin-bottom: 0px;
+    margin-right: 0px;
+    font-size: 1.2rem;
+    width: 100%;
+}
+
+.sidebar {
+    width: 270px;
+    background-color: #3c69ff;
+    color: #ffffff;
+    height: 100%;
+    transition: width 0.3s ease;
+    overflow: hidden;
+    padding-left: 15px;
+    padding-right: 15px;
+}

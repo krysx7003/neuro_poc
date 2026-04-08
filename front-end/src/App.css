@@ -1,3 +1,17 @@
+body {
+    margin: 0;
+    padding: 0;
+}
+.app-container {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    min-height: 100vh;
+}
+
+.main-content {
+    padding: 20px;
+}
+
 .normal {
     min-height: 100vh;
     padding: 15vh 30px 0vh 30px; 

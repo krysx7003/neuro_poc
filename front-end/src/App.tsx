@@ -1,6 +1,7 @@
 import DocumentList from "./components/DocumentList";
 import AnswerField from "./components/AnswerField";
 import InputField from "./components/InputField";
+import Sidebar from "./components/Sidebar";
 import type { Document } from "./types/components";
 import { useState } from "react";
 import "./App.css";
@@ -24,22 +25,31 @@ function App() {
 
     return (
         <>
-            <div className={answerVisible ? "normal" : "centered"}>
-                <InputField
-                    onSearch={(query: string) => {
-                        setCurrentQuery(query);
-                        console.log("User query: " + query);
-                        setAnswerVisible(isNotEmpty(query));
-                    }}
-                />
-                {answerVisible ? (
-                    <div>
-                        <AnswerField text={currentQuery} />
-                        <DocumentList full_docs={docs} />
-                    </div>
-                ) : (
-                    <div />
-                )}
+            <div className="app-container">
+                <Sidebar providers={["Ollama", "Groq"]} />
+                <div
+                    className={
+                        answerVisible
+                            ? "normal main-content"
+                            : "centered main-content"
+                    }
+                >
+                    <InputField
+                        onSearch={(query: string) => {
+                            setCurrentQuery(query);
+                            console.log("User query: " + query);
+                            setAnswerVisible(isNotEmpty(query));
+                        }}
+                    />
+                    {answerVisible ? (
+                        <div>
+                            <AnswerField text={currentQuery} />
+                            <DocumentList full_docs={docs} />
+                        </div>
+                    ) : (
+                        <div />
+                    )}
+                </div>
             </div>
         </>
     );
